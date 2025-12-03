@@ -1,0 +1,21 @@
+{
+  "name": "karbos",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Karbos - Full-stack application",
+  "author": "Sambit-Mondal",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/Sambit-Mondal/Karbos.git"
+  },
+  "scripts": {
+    "setup-audit": "node scripts/setup-audit-hooks.js",
+    "view-audit": "cat audit-logs/changes.log",
+    "view-audit-json": "cat audit-logs/changes.json"
+  },
+  "engines": {
+    "node": ">=18.18.0",
+    "npm": ">=9.0.0"
+  }
+}
