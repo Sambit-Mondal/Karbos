@@ -1,0 +1,5 @@
+#1A1B41 (Dark Navy)
+#292E6F (Indigo)
+#525FB0 (Blue-Purple)
+#A6B1E1 (Lavender)
+#D6DFFF (Light Blue)
