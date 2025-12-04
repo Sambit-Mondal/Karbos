@@ -1,6 +1,7 @@
 "use client";
 
 import React from "react";
+import { motion } from "framer-motion";
 
 // Generate deterministic mock data
 const generateChartData = () => {
@@ -28,10 +29,21 @@ const Overview = () => {
   const chartData = generateChartData();
 
   return (
-    <div className="space-y-6">
+    <motion.div 
+      initial={{ opacity: 0 }}
+      animate={{ opacity: 1 }}
+      transition={{ duration: 0.5 }}
+      className="space-y-6"
+    >
       {/* KPI Cards */}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
-        <div className="bg-karbos-indigo p-6 rounded-lg border border-karbos-blue-purple">
+        <motion.div 
+          initial={{ opacity: 0, y: 20 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ duration: 0.4, delay: 0.1 }}
+          whileHover={{ scale: 1.02, y: -4 }}
+          className="bg-karbos-indigo p-6 rounded-lg border border-karbos-blue-purple hover:border-karbos-lavender transition-colors"
+        >
           <h3 className="text-karbos-lavender text-sm font-medium">
             Total CO₂ Saved
           </h3>
@@ -39,9 +51,15 @@ const Overview = () => {
             {kpiData.totalCO2Saved} kg
           </p>
           <p className="text-green-400 text-sm mt-1">↑ 12% from last week</p>
-        </div>
+        </motion.div>
 
-        <div className="bg-karbos-indigo p-6 rounded-lg border border-karbos-blue-purple">
+        <motion.div 
+          initial={{ opacity: 0, y: 20 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ duration: 0.4, delay: 0.2 }}
+          whileHover={{ scale: 1.02, y: -4 }}
+          className="bg-karbos-indigo p-6 rounded-lg border border-karbos-blue-purple hover:border-karbos-lavender transition-colors"
+        >
           <h3 className="text-karbos-lavender text-sm font-medium">
             Active Jobs
           </h3>
@@ -49,9 +67,15 @@ const Overview = () => {
             {kpiData.activeJobs}
           </p>
           <p className="text-karbos-lavender text-sm mt-1">Running now</p>
-        </div>
+        </motion.div>
 
-        <div className="bg-karbos-indigo p-6 rounded-lg border border-karbos-blue-purple">
+        <motion.div 
+          initial={{ opacity: 0, y: 20 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ duration: 0.4, delay: 0.3 }}
+          whileHover={{ scale: 1.02, y: -4 }}
+          className="bg-karbos-indigo p-6 rounded-lg border border-karbos-blue-purple hover:border-karbos-lavender transition-colors"
+        >
           <h3 className="text-karbos-lavender text-sm font-medium">
             Pending (Optimized)
           </h3>
@@ -61,9 +85,15 @@ const Overview = () => {
           <p className="text-yellow-400 text-sm mt-1">
             Waiting for green window
           </p>
-        </div>
+        </motion.div>
 
-        <div className="bg-karbos-indigo p-6 rounded-lg border border-karbos-blue-purple">
+        <motion.div 
+          initial={{ opacity: 0, y: 20 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ duration: 0.4, delay: 0.4 }}
+          whileHover={{ scale: 1.02, y: -4 }}
+          className="bg-karbos-indigo p-6 rounded-lg border border-karbos-blue-purple hover:border-karbos-lavender transition-colors"
+        >
           <h3 className="text-karbos-lavender text-sm font-medium">
             Current Grid Intensity
           </h3>
@@ -77,11 +107,16 @@ const Overview = () => {
           >
             {kpiData.trend === "falling" ? "↓" : "↑"} gCO₂/kWh
           </p>
-        </div>
+        </motion.div>
       </div>
 
       {/* Eco-Curve Chart */}
-      <div className="bg-karbos-indigo p-6 rounded-lg border border-karbos-blue-purple">
+      <motion.div 
+        initial={{ opacity: 0, y: 20 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={{ duration: 0.5, delay: 0.4 }}
+        className="bg-karbos-indigo p-6 rounded-lg border border-karbos-blue-purple"
+      >
         <h2 className="text-xl font-semibold text-karbos-light-blue mb-4">
           24-Hour Carbon Intensity Forecast (Eco-Curve)
         </h2>
@@ -229,15 +264,26 @@ const Overview = () => {
             </div>
           </div>
         </div>
-      </div>
+      </motion.div>
 
       {/* Recent Activity */}
-      <div className="bg-karbos-indigo p-6 rounded-lg border border-karbos-blue-purple">
+      <motion.div 
+        initial={{ opacity: 0, y: 20 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={{ duration: 0.5, delay: 0.6 }}
+        className="bg-karbos-indigo p-6 rounded-lg border border-karbos-blue-purple"
+      >
         <h2 className="text-xl font-semibold text-karbos-light-blue mb-4">
           Recent Activity
         </h2>
         <div className="space-y-3">
-          <div className="flex items-center justify-between p-3 bg-karbos-navy rounded">
+          <motion.div 
+            initial={{ opacity: 0, x: -20 }}
+            animate={{ opacity: 1, x: 0 }}
+            transition={{ duration: 0.3, delay: 0.7 }}
+            whileHover={{ x: 4 }}
+            className="flex items-center justify-between p-3 bg-karbos-navy rounded cursor-pointer"
+          >
             <div>
               <p className="text-karbos-light-blue font-medium">
                 Job abc-123 completed
@@ -247,8 +293,14 @@ const Overview = () => {
               </p>
             </div>
             <span className="text-green-400 text-sm">2 min ago</span>
-          </div>
-          <div className="flex items-center justify-between p-3 bg-karbos-navy rounded">
+          </motion.div>
+          <motion.div 
+            initial={{ opacity: 0, x: -20 }}
+            animate={{ opacity: 1, x: 0 }}
+            transition={{ duration: 0.3, delay: 0.8 }}
+            whileHover={{ x: 4 }}
+            className="flex items-center justify-between p-3 bg-karbos-navy rounded cursor-pointer"
+          >
             <div>
               <p className="text-karbos-light-blue font-medium">
                 Job def-456 scheduled
@@ -258,8 +310,14 @@ const Overview = () => {
               </p>
             </div>
             <span className="text-yellow-400 text-sm">5 min ago</span>
-          </div>
-          <div className="flex items-center justify-between p-3 bg-karbos-navy rounded">
+          </motion.div>
+          <motion.div 
+            initial={{ opacity: 0, x: -20 }}
+            animate={{ opacity: 1, x: 0 }}
+            transition={{ duration: 0.3, delay: 0.9 }}
+            whileHover={{ x: 4 }}
+            className="flex items-center justify-between p-3 bg-karbos-navy rounded cursor-pointer"
+          >
             <div>
               <p className="text-karbos-light-blue font-medium">
                 Worker node-03 connected
@@ -269,10 +327,10 @@ const Overview = () => {
               </p>
             </div>
             <span className="text-blue-400 text-sm">12 min ago</span>
-          </div>
+          </motion.div>
         </div>
-      </div>
-    </div>
+      </motion.div>
+    </motion.div>
   );
 };
 

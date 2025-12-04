@@ -1,6 +1,7 @@
 "use client";
 
 import React, { useState } from "react";
+import { AnimatePresence } from "framer-motion";
 import Navigation from "@/components/Navigation";
 import Overview from "@/components/tabs/Overview";
 import Workloads from "@/components/tabs/Workloads";

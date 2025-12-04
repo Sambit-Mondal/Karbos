@@ -1,6 +1,9 @@
 "use client";
 
+"use client";
+
 import React from "react";
+import { motion } from "framer-motion";
 
 interface WorkerNode {
   id: string;
@@ -112,7 +115,12 @@ const Infrastructure = () => {
   };
 
   return (
-    <div className="space-y-6">
+    <motion.div 
+      initial={{ opacity: 0 }}
+      animate={{ opacity: 1 }}
+      transition={{ duration: 0.5 }}
+      className="space-y-6"
+    >
       {/* Header */}
       <div>
         <h2 className="text-2xl font-bold text-karbos-light-blue">
@@ -302,9 +310,13 @@ const Infrastructure = () => {
         </div>
 
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-          {workerNodes.map((node) => (
-            <div
+          {workerNodes.map((node, index) => (
+            <motion.div
               key={node.id}
+              initial={{ opacity: 0, y: 20 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ duration: 0.3, delay: index * 0.05 }}
+              whileHover={{ scale: 1.02, y: -4 }}
               className="bg-karbos-navy p-4 rounded-lg border border-karbos-blue-purple hover:border-karbos-lavender transition-colors"
             >
               <div className="flex items-start justify-between mb-3">
@@ -316,7 +328,9 @@ const Infrastructure = () => {
                     {node.id}
                   </p>
                 </div>
-                <div
+                <motion.div
+                  animate={{ scale: [1, 1.2, 1] }}
+                  transition={{ duration: 2, repeat: Infinity, delay: index * 0.2 }}
                   className={`w-3 h-3 rounded-full ${getStatusColor(node.status)}`}
                 />
               </div>
@@ -382,7 +396,7 @@ const Infrastructure = () => {
                   </div>
                 </div>
               </div>
-            </div>
+            </motion.div>
           ))}
         </div>
       </div>
@@ -425,7 +439,7 @@ const Infrastructure = () => {
           <p className="text-sm text-karbos-lavender mt-1">Cluster-wide</p>
         </div>
       </div>
-    </div>
+    </motion.div>
   );
 };
 

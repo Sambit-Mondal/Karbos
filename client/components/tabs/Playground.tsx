@@ -1,6 +1,7 @@
 "use client";
 
 import React, { useState } from "react";
+import { motion } from "framer-motion";
 
 interface JobSubmission {
   dockerImage: string;
@@ -132,7 +133,12 @@ const Playground = () => {
   };
 
   return (
-    <div className="space-y-6">
+    <motion.div 
+      initial={{ opacity: 0 }}
+      animate={{ opacity: 1 }}
+      transition={{ duration: 0.5 }}
+      className="space-y-6"
+    >
       {/* Header */}
       <div>
         <h2 className="text-2xl font-bold text-karbos-light-blue">
@@ -499,7 +505,7 @@ const Playground = () => {
           </div>
         </div>
       </div>
-    </div>
+    </motion.div>
   );
 };
 

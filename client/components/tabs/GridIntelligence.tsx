@@ -2,6 +2,7 @@
 
 import { getStatusColor } from "@/lib/utils";
 import React, { useState, useMemo } from "react";
+import { motion } from "framer-motion";
 
 interface Region {
   id: string;
@@ -76,7 +77,12 @@ const GridIntelligence = () => {
   };
 
   return (
-    <div className="space-y-6">
+    <motion.div 
+      initial={{ opacity: 0 }}
+      animate={{ opacity: 1 }}
+      transition={{ duration: 0.5 }}
+      className="space-y-6"
+    >
       {/* Header */}
       <div>
         <h2 className="text-2xl font-bold text-karbos-light-blue">
@@ -94,11 +100,15 @@ const GridIntelligence = () => {
         </h3>
 
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-          {regions.map((region) => {
+          {regions.map((region, index) => {
             const { label, color } = getIntensityLabel(region.intensity);
             return (
-              <div
+              <motion.div
                 key={region.id}
+                initial={{ opacity: 0, scale: 0.9 }}
+                animate={{ opacity: 1, scale: 1 }}
+                transition={{ duration: 0.3, delay: index * 0.05 }}
+                whileHover={{ scale: 1.03, y: -4 }}
                 onClick={() => setSelectedRegion(region.id)}
                 className={`p-4 rounded-lg border-2 cursor-pointer transition-all ${
                   selectedRegion === region.id
@@ -110,7 +120,9 @@ const GridIntelligence = () => {
                   <h4 className="text-karbos-light-blue font-semibold">
                     {region.name}
                   </h4>
-                  <div
+                  <motion.div
+                    animate={{ scale: [1, 1.2, 1] }}
+                    transition={{ duration: 2, repeat: Infinity, delay: index * 0.2 }}
                     className={`w-3 h-3 rounded-full ${getStatusColor(region.status)}`}
                     title={`Status: ${region.status}`}
                   />
@@ -125,7 +137,7 @@ const GridIntelligence = () => {
                 <p className={`text-sm font-medium mt-1 ${color}`}>
                   {label} Intensity
                 </p>
-              </div>
+              </motion.div>
             );
           })}
         </div>
@@ -293,7 +305,7 @@ const GridIntelligence = () => {
           </div>
         </div>
       </div>
-    </div>
+    </motion.div>
   );
 };
 
