@@ -9,7 +9,17 @@ module.exports = {
     "./src/**/*.{js,ts,jsx,tsx,mdx}",
   ],
   theme: {
-    extend: {},
+    extend: {
+      colors: {
+        karbos: {
+          navy: "#1A1B41",
+          indigo: "#292E6F",
+          "blue-purple": "#525FB0",
+          lavender: "#A6B1E1",
+          "light-blue": "#D6DFFF",
+        },
+      },
+    },
   },
   plugins: [],
 };
