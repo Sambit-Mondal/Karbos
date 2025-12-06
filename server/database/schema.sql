@@ -44,6 +44,7 @@ CREATE TABLE IF NOT EXISTS execution_logs (
     started_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW(),
     completed_at TIMESTAMP WITH TIME ZONE,
     worker_node_id VARCHAR(100),
+    created_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW(),
     
     CONSTRAINT execution_logs_job_fk FOREIGN KEY (job_id) REFERENCES jobs(id)
 );
