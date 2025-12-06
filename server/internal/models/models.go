@@ -38,13 +38,14 @@ type Job struct {
 type ExecutionLog struct {
 	ID           uuid.UUID  `json:"id" db:"id"`
 	JobID        uuid.UUID  `json:"job_id" db:"job_id"`
-	Output       *string    `json:"output,omitempty" db:"output"`
-	ErrorOutput  *string    `json:"error_output,omitempty" db:"error_output"`
-	ExitCode     *int       `json:"exit_code,omitempty" db:"exit_code"`
-	Duration     *int       `json:"duration,omitempty" db:"duration"` // in seconds
+	Output       string     `json:"output,omitempty" db:"output"`
+	ErrorMessage *string    `json:"error_message,omitempty" db:"error_output"`
+	ExitCode     int        `json:"exit_code,omitempty" db:"exit_code"`
+	Duration     int        `json:"duration,omitempty" db:"duration"` // in seconds
 	StartedAt    time.Time  `json:"started_at" db:"started_at"`
 	CompletedAt  *time.Time `json:"completed_at,omitempty" db:"completed_at"`
 	WorkerNodeID *string    `json:"worker_node_id,omitempty" db:"worker_node_id"`
+	CreatedAt    time.Time  `json:"created_at" db:"created_at"`
 }
 
 // CarbonCache represents cached carbon intensity data
