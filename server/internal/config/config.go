@@ -14,6 +14,8 @@ type Config struct {
 	Database DatabaseConfig
 	Redis    RedisConfig
 	Queue    QueueConfig
+	Worker   WorkerConfig
+	Docker   DockerConfig
 }
 
 // ServerConfig holds server-specific configuration
@@ -22,6 +24,21 @@ type ServerConfig struct {
 	Environment string
 	RateLimit   string
 	Timeout     string
+}
+
+// WorkerConfig holds worker pool configuration
+type WorkerConfig struct {
+	PoolSize     int
+	PollInterval string
+	JobTimeout   string
+	MaxRetries   int
+}
+
+// DockerConfig holds Docker daemon configuration
+type DockerConfig struct {
+	Host        string
+	MemoryLimit int64
+	CPUQuota    int64
 }
 
 // DatabaseConfig holds database connection configuration
@@ -70,6 +87,17 @@ func LoadConfig() (*Config, error) {
 			ImmediateQueueKey: getEnv("IMMEDIATE_QUEUE_KEY", "karbos:queue:immediate"),
 			DelayedSetKey:     getEnv("DELAYED_SET_KEY", "karbos:queue:delayed"),
 		},
+		Worker: WorkerConfig{
+			PoolSize:     getEnvAsInt("WORKER_POOL_SIZE", 5),
+			PollInterval: getEnv("WORKER_POLL_INTERVAL", "2s"),
+			JobTimeout:   getEnv("WORKER_JOB_TIMEOUT", "10m"),
+			MaxRetries:   getEnvAsInt("WORKER_MAX_RETRIES", 3),
+		},
+		Docker: DockerConfig{
+			Host:        getEnv("DOCKER_HOST", ""),
+			MemoryLimit: getEnvAsInt64("DOCKER_MEMORY_LIMIT", 536870912), // 512MB
+			CPUQuota:    getEnvAsInt64("DOCKER_CPU_QUOTA", 50000),        // 50% of one CPU
+		},
 	}
 
 	// Validate required configuration
@@ -87,6 +115,34 @@ func getEnv(key, defaultValue string) string {
 		return defaultValue
 	}
 	return value
+}
+
+// getEnvAsInt retrieves an environment variable as int or returns default
+func getEnvAsInt(key string, defaultValue int) int {
+	value := os.Getenv(key)
+	if value == "" {
+		return defaultValue
+	}
+	var intValue int
+	if _, err := fmt.Sscanf(value, "%d", &intValue); err != nil {
+		log.Printf("Warning: Invalid integer value for %s, using default: %d", key, defaultValue)
+		return defaultValue
+	}
+	return intValue
+}
+
+// getEnvAsInt64 retrieves an environment variable as int64 or returns default
+func getEnvAsInt64(key string, defaultValue int64) int64 {
+	value := os.Getenv(key)
+	if value == "" {
+		return defaultValue
+	}
+	var intValue int64
+	if _, err := fmt.Sscanf(value, "%d", &intValue); err != nil {
+		log.Printf("Warning: Invalid int64 value for %s, using default: %d", key, defaultValue)
+		return defaultValue
+	}
+	return intValue
 }
 
 // IsDevelopment returns true if running in development mode
