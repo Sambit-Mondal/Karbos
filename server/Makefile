@@ -19,9 +19,21 @@ build: ## Build the server binary
 	go build -o bin/karbos-server cmd/api/main.go
 	@echo "$(GREEN)✓ Build complete: bin/karbos-server$(NC)"
 
+build-worker: ## Build the worker binary
+	@echo "$(GREEN)Building worker...$(NC)"
+	go build -o bin/karbos-worker cmd/worker/main.go
+	@echo "$(GREEN)✓ Build complete: bin/karbos-worker$(NC)"
+
+build-all: build build-worker ## Build both server and worker binaries
+	@echo "$(GREEN)✓ All binaries built$(NC)"
+
 run: ## Run the server
 	@echo "$(GREEN)Starting Karbos server...$(NC)"
 	go run cmd/api/main.go
+
+run-worker: ## Run the worker
+	@echo "$(GREEN)Starting Karbos worker...$(NC)"
+	go run cmd/worker/main.go
 
 dev: ## Run with auto-reload (requires air: go install github.com/cosmtrek/air@latest)
 	@echo "$(GREEN)Starting development server with auto-reload...$(NC)"
