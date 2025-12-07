@@ -2,27 +2,31 @@ package handlers
 
 import (
 	"context"
+	"encoding/json"
 	"log"
 	"time"
 
 	"github.com/Sambit-Mondal/karbos/server/internal/database"
 	"github.com/Sambit-Mondal/karbos/server/internal/models"
 	"github.com/Sambit-Mondal/karbos/server/internal/queue"
+	"github.com/Sambit-Mondal/karbos/server/internal/scheduler"
 	"github.com/gofiber/fiber/v2"
 	"github.com/google/uuid"
 )
 
 // JobHandler handles job-related HTTP requests
 type JobHandler struct {
-	jobRepo *database.JobRepository
-	queue   *queue.RedisQueue
+	jobRepo   *database.JobRepository
+	queue     *queue.RedisQueue
+	scheduler *scheduler.CarbonScheduler
 }
 
 // NewJobHandler creates a new job handler
-func NewJobHandler(jobRepo *database.JobRepository, queue *queue.RedisQueue) *JobHandler {
+func NewJobHandler(jobRepo *database.JobRepository, queue *queue.RedisQueue, scheduler *scheduler.CarbonScheduler) *JobHandler {
 	return &JobHandler{
-		jobRepo: jobRepo,
-		queue:   queue,
+		jobRepo:   jobRepo,
+		queue:     queue,
+		scheduler: scheduler,
 	}
 }
 
@@ -68,16 +72,87 @@ func (h *JobHandler) SubmitJob(c *fiber.Ctx) error {
 		})
 	}
 
+	// Set default region if not provided
+	region := "US-EAST" // Default region
+	if req.Region != nil && *req.Region != "" {
+		region = *req.Region
+	}
+
+	// Determine estimated duration
+	var estimatedDuration time.Duration
+	if req.EstimatedDuration != nil && *req.EstimatedDuration > 0 {
+		estimatedDuration = time.Duration(*req.EstimatedDuration) * time.Second
+	} else {
+		estimatedDuration = 10 * time.Minute // Default 10 minutes
+	}
+
+	// Carbon-aware scheduling
+	var scheduledTime time.Time
+	var immediate bool = true
+	var expectedIntensity float64 = 0
+	var carbonSavings float64 = 0
+
+	// Create context for scheduling
+	schedCtx, schedCancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer schedCancel()
+
+	if h.scheduler != nil {
+		// Create scheduling request
+		schedReq := &scheduler.ScheduleRequest{
+			Region:     region,
+			Duration:   estimatedDuration,
+			Deadline:   deadline,
+			WindowSize: 24 * time.Hour,
+		}
+
+		// Get scheduling recommendation
+		schedResult, err := h.scheduler.Schedule(schedCtx, schedReq)
+		if err != nil {
+			log.Printf("⚠ Scheduling failed, defaulting to immediate: %v", err)
+			// Continue with immediate execution
+		} else {
+			scheduledTime = schedResult.ScheduledTime
+			immediate = schedResult.Immediate
+			expectedIntensity = schedResult.ExpectedIntensity
+			carbonSavings = schedResult.CarbonSavings
+
+			log.Printf("✓ Carbon scheduling: immediate=%v, scheduled=%v, savings=%.2f gCO2eq/kWh",
+				immediate, scheduledTime.Format(time.RFC3339), carbonSavings)
+		}
+	}
+
+	// If no scheduled time determined, use now
+	if scheduledTime.IsZero() {
+		scheduledTime = time.Now()
+	}
+
+	// Serialize command array to JSON string for database storage
+	var commandStr *string
+	if len(req.Command) > 0 {
+		cmdJSON, err := json.Marshal(req.Command)
+		if err != nil {
+			log.Printf("Failed to serialize command: %v", err)
+			return c.Status(fiber.StatusBadRequest).JSON(models.ErrorResponse{
+				Error:   "invalid_command",
+				Message: "Failed to process command",
+				Code:    fiber.StatusBadRequest,
+			})
+		}
+		cmdJSONStr := string(cmdJSON)
+		commandStr = &cmdJSONStr
+	}
+
 	// Create job object
 	job := &models.Job{
 		ID:                uuid.New(),
 		UserID:            req.UserID,
 		DockerImage:       req.DockerImage,
-		Command:           req.Command,
+		Command:           commandStr,
 		Status:            models.JobStatusPending,
 		Deadline:          deadline,
 		EstimatedDuration: req.EstimatedDuration,
-		Region:            req.Region,
+		Region:            &region,
+		ScheduledTime:     &scheduledTime,
 		CreatedAt:         time.Now(),
 		Metadata:          "{}",
 	}
@@ -102,23 +177,42 @@ func (h *JobHandler) SubmitJob(c *fiber.Ctx) error {
 		JobID:         job.ID.String(),
 		DockerImage:   job.DockerImage,
 		Command:       job.Command,
-		ScheduledTime: time.Now(), // Immediate execution for now
+		ScheduledTime: scheduledTime,
 		Priority:      0,
 	}
 
-	// Push to Redis immediate queue
-	if err := h.queue.EnqueueImmediate(ctx, queueItem); err != nil {
-		log.Printf("Failed to enqueue job: %v", err)
-		// Note: Job is already in database, so we return success but log the error
-		// In production, you might want to implement retry logic or dead letter queue
+	// Route to appropriate queue based on scheduling decision
+	if immediate {
+		// Push to Redis immediate queue (FIFO List)
+		if err := h.queue.EnqueueImmediate(ctx, queueItem); err != nil {
+			log.Printf("Failed to enqueue immediate job: %v", err)
+		} else {
+			log.Printf("✓ Job queued for immediate execution: %s", job.ID)
+		}
+	} else {
+		// Push to Redis delayed queue (Sorted Set with scheduled_time as score)
+		if err := h.queue.EnqueueDelayed(ctx, queueItem); err != nil {
+			log.Printf("Failed to enqueue delayed job: %v", err)
+		} else {
+			log.Printf("✓ Job scheduled for later execution at %s: %s",
+				scheduledTime.Format(time.RFC3339), job.ID)
+		}
 	}
 
-	// Return success response
+	// Prepare response
 	response := models.SubmitJobResponse{
-		JobID:     job.ID.String(),
-		Status:    job.Status,
-		CreatedAt: job.CreatedAt,
-		Message:   "Job submitted successfully",
+		JobID:             job.ID.String(),
+		Status:            job.Status,
+		CreatedAt:         job.CreatedAt,
+		ScheduledTime:     scheduledTime.Format(time.RFC3339),
+		Immediate:         immediate,
+		ExpectedIntensity: expectedIntensity,
+		CarbonSavings:     carbonSavings,
+		Message:           "Job submitted successfully",
+	}
+
+	if !immediate {
+		response.Message = "Job scheduled for optimal carbon efficiency"
 	}
 
 	log.Printf("✓ Job submitted successfully: %s (UserID: %s, Image: %s)",
