@@ -78,14 +78,14 @@ func (q *RedisQueue) EnqueueImmediate(ctx context.Context, item *QueueItem) erro
 }
 
 // EnqueueDelayed adds a job to the delayed execution queue (Sorted Set with timestamp score)
-func (q *RedisQueue) EnqueueDelayed(ctx context.Context, item *QueueItem, executeAt time.Time) error {
+func (q *RedisQueue) EnqueueDelayed(ctx context.Context, item *QueueItem) error {
 	data, err := json.Marshal(item)
 	if err != nil {
 		return fmt.Errorf("failed to marshal queue item: %w", err)
 	}
 
-	// Use Unix timestamp as the score for the sorted set
-	score := float64(executeAt.Unix())
+	// Use scheduled time's Unix timestamp as the score for the sorted set
+	score := float64(item.ScheduledTime.Unix())
 
 	member := redis.Z{
 		Score:  score,
@@ -96,7 +96,7 @@ func (q *RedisQueue) EnqueueDelayed(ctx context.Context, item *QueueItem, execut
 		return fmt.Errorf("failed to enqueue delayed job: %w", err)
 	}
 
-	log.Printf("✓ Enqueued delayed job: %s (scheduled for %s)", item.JobID, executeAt.Format(time.RFC3339))
+	log.Printf("✓ Enqueued delayed job: %s (scheduled for %s)", item.JobID, item.ScheduledTime.Format(time.RFC3339))
 	return nil
 }
 
@@ -199,4 +199,82 @@ func (q *RedisQueue) GetDelayedQueueLength(ctx context.Context) (int64, error) {
 // HealthCheck performs a Redis health check
 func (q *RedisQueue) HealthCheck(ctx context.Context) error {
 	return q.client.Ping(ctx).Err()
+}
+
+// GetReadyDelayedJobs retrieves all jobs from delayed queue that are ready to execute
+func (q *RedisQueue) GetReadyDelayedJobs(ctx context.Context, now time.Time) ([]*QueueItem, error) {
+	score := float64(now.Unix())
+
+	// Get jobs with score (timestamp) <= now
+	results, err := q.client.ZRangeByScore(ctx, q.delayedSetKey, &redis.ZRangeBy{
+		Min: "-inf",
+		Max: fmt.Sprintf("%f", score),
+	}).Result()
+
+	if err != nil {
+		return nil, fmt.Errorf("failed to get ready delayed jobs: %w", err)
+	}
+
+	if len(results) == 0 {
+		return nil, nil
+	}
+
+	var items []*QueueItem
+	for _, result := range results {
+		var item QueueItem
+		if err := json.Unmarshal([]byte(result), &item); err != nil {
+			log.Printf("Warning: failed to unmarshal delayed job: %v", err)
+			continue
+		}
+		items = append(items, &item)
+	}
+
+	return items, nil
+}
+
+// RemoveFromDelayed removes a specific job from the delayed queue by job ID
+func (q *RedisQueue) RemoveFromDelayed(ctx context.Context, jobID string) error {
+	// Get all members and find the one with matching jobID
+	results, err := q.client.ZRange(ctx, q.delayedSetKey, 0, -1).Result()
+	if err != nil {
+		return fmt.Errorf("failed to get delayed jobs: %w", err)
+	}
+
+	for _, result := range results {
+		var item QueueItem
+		if err := json.Unmarshal([]byte(result), &item); err != nil {
+			continue
+		}
+
+		if item.JobID == jobID {
+			if err := q.client.ZRem(ctx, q.delayedSetKey, result).Err(); err != nil {
+				return fmt.Errorf("failed to remove delayed job: %w", err)
+			}
+			return nil
+		}
+	}
+
+	return fmt.Errorf("job %s not found in delayed queue", jobID)
+}
+
+// GetDelayedQueueStats returns statistics about the delayed queue
+func (q *RedisQueue) GetDelayedQueueStats(ctx context.Context) (map[string]interface{}, error) {
+	totalDelayed, err := q.GetDelayedQueueLength(ctx)
+	if err != nil {
+		return nil, err
+	}
+
+	// Count ready jobs
+	readyJobs, err := q.GetReadyDelayedJobs(ctx, time.Now())
+	if err != nil {
+		return nil, err
+	}
+
+	stats := map[string]interface{}{
+		"total_delayed_jobs": totalDelayed,
+		"ready_jobs":         len(readyJobs),
+		"pending_jobs":       totalDelayed - int64(len(readyJobs)),
+	}
+
+	return stats, nil
 }
