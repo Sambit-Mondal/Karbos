@@ -9,10 +9,13 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/Sambit-Mondal/karbos/server/internal/carbon"
 	"github.com/Sambit-Mondal/karbos/server/internal/config"
 	"github.com/Sambit-Mondal/karbos/server/internal/database"
 	"github.com/Sambit-Mondal/karbos/server/internal/handlers"
 	"github.com/Sambit-Mondal/karbos/server/internal/queue"
+	"github.com/Sambit-Mondal/karbos/server/internal/scheduler"
+	"github.com/Sambit-Mondal/karbos/server/internal/worker"
 	"github.com/gofiber/fiber/v2"
 	"github.com/gofiber/fiber/v2/middleware/cors"
 	"github.com/gofiber/fiber/v2/middleware/logger"
@@ -52,9 +55,59 @@ func main() {
 
 	// Initialize repositories
 	jobRepo := database.NewJobRepository(db)
+	carbonCacheRepo := database.NewCarbonCacheRepository(db)
+
+	// Initialize carbon service
+	var carbonService carbon.CarbonService
+	cacheTTL, _ := time.ParseDuration(cfg.Carbon.CacheTTL)
+	if cacheTTL == 0 {
+		cacheTTL = 1 * time.Hour
+	}
+
+	if cfg.Carbon.Provider == "watttime" && cfg.Carbon.APIUsername != "" {
+		log.Println("✓ Using WattTime carbon service")
+		carbonService = carbon.NewWattTimeClient(
+			cfg.Carbon.APIUsername,
+			cfg.Carbon.APIPassword,
+			cfg.Carbon.BaseURL,
+		)
+	} else if cfg.Carbon.APIKey != "" {
+		log.Println("✓ Using ElectricityMaps carbon service")
+		carbonService = carbon.NewElectricityMapsClient(
+			cfg.Carbon.APIKey,
+			cfg.Carbon.BaseURL,
+		)
+	} else {
+		log.Println("⚠ No carbon API configured, scheduling will use default behavior")
+	}
+
+	// Initialize carbon fetcher with cache
+	var carbonFetcher *carbon.CarbonFetcher
+	var carbonScheduler *scheduler.CarbonScheduler
+
+	if carbonService != nil {
+		cacheWrapper := carbon.NewDatabaseCacheWrapper(carbonCacheRepo)
+		carbonFetcher = carbon.NewCarbonFetcher(carbonService, cacheWrapper, cacheTTL)
+		carbonScheduler = scheduler.NewCarbonScheduler(carbonFetcher)
+		log.Println("✓ Carbon-aware scheduling enabled")
+	}
+
+	// Initialize delayed job promoter
+	promoterCheckInterval, _ := time.ParseDuration(cfg.Promoter.CheckInterval)
+	if promoterCheckInterval == 0 {
+		promoterCheckInterval = 10 * time.Second
+	}
+	promoterService := worker.NewPromoterService(redisQueue, promoterCheckInterval)
+
+	// Start promoter service
+	ctx := context.Background()
+	if err := promoterService.Start(ctx); err != nil {
+		log.Fatalf("Failed to start promoter service: %v", err)
+	}
+	defer promoterService.Stop()
 
 	// Initialize handlers
-	jobHandler := handlers.NewJobHandler(jobRepo, redisQueue)
+	jobHandler := handlers.NewJobHandler(jobRepo, redisQueue, carbonScheduler)
 	healthHandler := handlers.NewHealthHandler(db, redisQueue)
 
 	// Create Fiber app
@@ -113,9 +166,9 @@ func main() {
 	// Start server
 	addr := fmt.Sprintf(":%s", cfg.Server.Port)
 	log.Printf("✓ Server listening on http://localhost%s", addr)
-	log.Println("✓ Phase 1 Infrastructure Skeleton Complete!")
+	log.Println("✓ Phase 3 Intelligence Layer Complete!")
 	log.Println("\n📋 Available Endpoints:")
-	log.Println("  POST   /api/submit          - Submit a new job")
+	log.Println("  POST   /api/submit          - Submit a new job (with carbon-aware scheduling)")
 	log.Println("  GET    /api/jobs/:id        - Get job details")
 	log.Println("  GET    /api/users/:id/jobs  - Get user's jobs")
 	log.Println("  GET    /health              - Health check")
@@ -146,7 +199,7 @@ func setupRoutes(app *fiber.App, jobHandler *handlers.JobHandler, healthHandler 
 			"service": "Karbos API Gateway",
 			"version": "1.0.0",
 			"status":  "operational",
-			"phase":   "1 - Infrastructure Skeleton",
+			"phase":   "3 - Intelligence Layer (Carbon-Aware Scheduling)",
 		})
 	})
 
