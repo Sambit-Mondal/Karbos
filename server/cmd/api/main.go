@@ -166,7 +166,8 @@ func main() {
 	// Start server
 	addr := fmt.Sprintf(":%s", cfg.Server.Port)
 	log.Printf("✓ Server listening on http://localhost%s", addr)
-	log.Println("✓ Phase 3 Intelligence Layer Complete!")
+	log.Println("✓ Phase 4: The Dispatcher Complete!")
+	log.Println("✓ All 4 Phases Operational - Carbon-Aware Job Scheduling System Ready!")
 	log.Println("\n📋 Available Endpoints:")
 	log.Println("  POST   /api/submit          - Submit a new job (with carbon-aware scheduling)")
 	log.Println("  GET    /api/jobs/:id        - Get job details")
@@ -199,7 +200,13 @@ func setupRoutes(app *fiber.App, jobHandler *handlers.JobHandler, healthHandler 
 			"service": "Karbos API Gateway",
 			"version": "1.0.0",
 			"status":  "operational",
-			"phase":   "3 - Intelligence Layer (Carbon-Aware Scheduling)",
+			"phase":   "4 - The Dispatcher (All Phases Complete)",
+			"features": []string{
+				"Phase 1: Infrastructure Skeleton",
+				"Phase 2: Worker Node (Docker Execution)",
+				"Phase 3: Intelligence Layer (Carbon-Aware Scheduling)",
+				"Phase 4: The Dispatcher (Time-Based Job Promotion)",
+			},
 		})
 	})
 
