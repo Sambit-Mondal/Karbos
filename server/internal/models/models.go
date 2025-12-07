@@ -61,20 +61,24 @@ type CarbonCache struct {
 
 // SubmitJobRequest represents the API request for job submission
 type SubmitJobRequest struct {
-	UserID            string  `json:"user_id" validate:"required"`
-	DockerImage       string  `json:"docker_image" validate:"required"`
-	Command           *string `json:"command,omitempty"`
-	Deadline          string  `json:"deadline" validate:"required"` // ISO 8601 format
-	EstimatedDuration *int    `json:"estimated_duration,omitempty"` // in seconds
-	Region            *string `json:"region,omitempty"`
+	UserID            string   `json:"user_id" validate:"required"`
+	DockerImage       string   `json:"docker_image" validate:"required"`
+	Command           []string `json:"command,omitempty"`
+	Deadline          string   `json:"deadline" validate:"required"` // ISO 8601 format
+	EstimatedDuration *int     `json:"estimated_duration,omitempty"` // in seconds
+	Region            *string  `json:"region,omitempty"`
 }
 
 // SubmitJobResponse represents the API response for job submission
 type SubmitJobResponse struct {
-	JobID     string    `json:"job_id"`
-	Status    JobStatus `json:"status"`
-	CreatedAt time.Time `json:"created_at"`
-	Message   string    `json:"message"`
+	JobID             string    `json:"job_id"`
+	Status            JobStatus `json:"status"`
+	CreatedAt         time.Time `json:"created_at"`
+	ScheduledTime     string    `json:"scheduled_time"`
+	Immediate         bool      `json:"immediate"`
+	ExpectedIntensity float64   `json:"expected_intensity,omitempty"`
+	CarbonSavings     float64   `json:"carbon_savings,omitempty"`
+	Message           string    `json:"message"`
 }
 
 // ErrorResponse represents an API error response
