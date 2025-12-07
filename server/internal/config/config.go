@@ -16,6 +16,8 @@ type Config struct {
 	Queue    QueueConfig
 	Worker   WorkerConfig
 	Docker   DockerConfig
+	Carbon   CarbonConfig
+	Promoter PromoterConfig
 }
 
 // ServerConfig holds server-specific configuration
@@ -39,6 +41,22 @@ type DockerConfig struct {
 	Host        string
 	MemoryLimit int64
 	CPUQuota    int64
+}
+
+// CarbonConfig holds carbon service configuration
+type CarbonConfig struct {
+	Provider    string // "electricitymaps" or "watttime"
+	APIKey      string
+	APIUsername string // For WattTime
+	APIPassword string // For WattTime
+	BaseURL     string
+	CacheTTL    string // Cache time-to-live (default "1h")
+	Region      string // Default region
+}
+
+// PromoterConfig holds delayed job promoter configuration
+type PromoterConfig struct {
+	CheckInterval string // How often to check for ready jobs (default "10s")
 }
 
 // DatabaseConfig holds database connection configuration
@@ -97,6 +115,18 @@ func LoadConfig() (*Config, error) {
 			Host:        getEnv("DOCKER_HOST", ""),
 			MemoryLimit: getEnvAsInt64("DOCKER_MEMORY_LIMIT", 536870912), // 512MB
 			CPUQuota:    getEnvAsInt64("DOCKER_CPU_QUOTA", 50000),        // 50% of one CPU
+		},
+		Carbon: CarbonConfig{
+			Provider:    getEnv("CARBON_PROVIDER", "electricitymaps"),
+			APIKey:      getEnv("CARBON_API_KEY", ""),
+			APIUsername: getEnv("CARBON_API_USERNAME", ""),
+			APIPassword: getEnv("CARBON_API_PASSWORD", ""),
+			BaseURL:     getEnv("CARBON_API_URL", ""),
+			CacheTTL:    getEnv("CARBON_CACHE_TTL", "1h"),
+			Region:      getEnv("CARBON_DEFAULT_REGION", "US-EAST"),
+		},
+		Promoter: PromoterConfig{
+			CheckInterval: getEnv("PROMOTER_CHECK_INTERVAL", "10s"),
 		},
 	}
 
