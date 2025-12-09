@@ -13,6 +13,7 @@ import (
 	"github.com/Sambit-Mondal/karbos/server/internal/config"
 	"github.com/Sambit-Mondal/karbos/server/internal/database"
 	"github.com/Sambit-Mondal/karbos/server/internal/handlers"
+	"github.com/Sambit-Mondal/karbos/server/internal/metrics"
 	"github.com/Sambit-Mondal/karbos/server/internal/queue"
 	"github.com/Sambit-Mondal/karbos/server/internal/scheduler"
 	"github.com/Sambit-Mondal/karbos/server/internal/worker"
@@ -66,17 +67,21 @@ func main() {
 
 	if cfg.Carbon.Provider == "watttime" && cfg.Carbon.APIUsername != "" {
 		log.Println("✓ Using WattTime carbon service")
-		carbonService = carbon.NewWattTimeClient(
+		wattTimeClient := carbon.NewWattTimeClient(
 			cfg.Carbon.APIUsername,
 			cfg.Carbon.APIPassword,
 			cfg.Carbon.BaseURL,
 		)
+		// Wrap with circuit breaker
+		carbonService = wrapWithCircuitBreaker(wattTimeClient, cfg)
 	} else if cfg.Carbon.APIKey != "" {
 		log.Println("✓ Using ElectricityMaps carbon service")
-		carbonService = carbon.NewElectricityMapsClient(
+		emClient := carbon.NewElectricityMapsClient(
 			cfg.Carbon.APIKey,
 			cfg.Carbon.BaseURL,
 		)
+		// Wrap with circuit breaker
+		carbonService = wrapWithCircuitBreaker(emClient, cfg)
 	} else {
 		log.Println("⚠ No carbon API configured, scheduling will use default behavior")
 	}
@@ -105,6 +110,15 @@ func main() {
 		log.Fatalf("Failed to start promoter service: %v", err)
 	}
 	defer promoterService.Stop()
+
+	// Initialize Prometheus metrics (if enabled)
+	var metricsCollector *metrics.MetricsCollector
+	if cfg.Metrics.Enabled {
+		metricsCollector = metrics.NewMetricsCollector(redisQueue, nil, db.DB) // workerPool will be nil (API server doesn't run workers)
+		// Start background metrics updater (every 10 seconds)
+		metricsCollector.StartBackgroundUpdater(ctx, 10*time.Second)
+		log.Printf("✓ Prometheus metrics enabled on port %s", cfg.Metrics.Port)
+	}
 
 	// Initialize handlers
 	jobHandler := handlers.NewJobHandler(jobRepo, redisQueue, carbonScheduler)
@@ -142,7 +156,7 @@ func main() {
 	}
 
 	// Routes
-	setupRoutes(app, jobHandler, healthHandler)
+	setupRoutes(app, jobHandler, healthHandler, metricsCollector, cfg)
 
 	// Graceful shutdown
 	go func() {
@@ -166,25 +180,74 @@ func main() {
 	// Start server
 	addr := fmt.Sprintf(":%s", cfg.Server.Port)
 	log.Printf("✓ Server listening on http://localhost%s", addr)
-	log.Println("✓ Phase 4: The Dispatcher Complete!")
-	log.Println("✓ All 4 Phases Operational - Carbon-Aware Job Scheduling System Ready!")
+	log.Println("✓ Phase 5: Reliability & Monitoring Complete!")
+	log.Println("✓ All 5 Phases Operational - Production-Ready Carbon-Aware Job Scheduling System!")
 	log.Println("\n📋 Available Endpoints:")
 	log.Println("  POST   /api/submit          - Submit a new job (with carbon-aware scheduling)")
 	log.Println("  GET    /api/jobs/:id        - Get job details")
 	log.Println("  GET    /api/users/:id/jobs  - Get user's jobs")
 	log.Println("  GET    /health              - Health check")
 	log.Println("  GET    /ready               - Readiness check")
+	if cfg.Metrics.Enabled {
+		log.Printf("  GET    /metrics             - Prometheus metrics (port %s)\n", cfg.Metrics.Port)
+	}
 
 	if err := app.Listen(addr); err != nil {
 		log.Fatalf("Failed to start server: %v", err)
 	}
 }
 
+// wrapWithCircuitBreaker wraps a carbon service with circuit breaker protection
+func wrapWithCircuitBreaker(service carbon.CarbonService, cfg *config.Config) carbon.CarbonService {
+	timeout, _ := time.ParseDuration(cfg.CircuitBreaker.Timeout)
+	if timeout == 0 {
+		timeout = 30 * time.Second
+	}
+
+	resetTimeout, _ := time.ParseDuration(cfg.CircuitBreaker.ResetTimeout)
+	if resetTimeout == 0 {
+		resetTimeout = 10 * time.Second
+	}
+
+	var staticFallback float64
+	if _, err := fmt.Sscanf(cfg.CircuitBreaker.StaticFallback, "%f", &staticFallback); err != nil {
+		staticFallback = 400.0 // Default global average
+	}
+
+	cbConfig := carbon.CircuitBreakerConfig{
+		MaxFailures:    cfg.CircuitBreaker.MaxFailures,
+		Timeout:        timeout,
+		ResetTimeout:   resetTimeout,
+		StaticFallback: staticFallback,
+	}
+
+	circuitBreaker := carbon.NewCircuitBreaker(service, cbConfig)
+	log.Printf("✓ Circuit breaker enabled (threshold: %d failures, fallback: %.1f gCO2eq/kWh)",
+		cbConfig.MaxFailures, cbConfig.StaticFallback)
+
+	return circuitBreaker
+}
+
 // setupRoutes configures all API routes
-func setupRoutes(app *fiber.App, jobHandler *handlers.JobHandler, healthHandler *handlers.HealthHandler) {
+func setupRoutes(app *fiber.App, jobHandler *handlers.JobHandler, healthHandler *handlers.HealthHandler, metricsCollector *metrics.MetricsCollector, cfg *config.Config) {
 	// Health checks
 	app.Get("/health", healthHandler.HealthCheck)
 	app.Get("/ready", healthHandler.ReadyCheck)
+
+	// Metrics endpoint (if enabled)
+	if cfg.Metrics.Enabled && metricsCollector != nil {
+		app.Get("/metrics", func(c *fiber.Ctx) error {
+			// Update metrics before serving
+			ctx := context.Background()
+			if err := metricsCollector.UpdateMetrics(ctx); err != nil {
+				log.Printf("Warning: Failed to update metrics: %v", err)
+			}
+
+			// Get metrics as Prometheus text format
+			// We'll use the promhttp handler by creating an adapter
+			return c.SendString(metricsCollector.GetPrometheusText())
+		})
+	}
 
 	// API v1 routes
 	api := app.Group("/api")
@@ -200,12 +263,13 @@ func setupRoutes(app *fiber.App, jobHandler *handlers.JobHandler, healthHandler 
 			"service": "Karbos API Gateway",
 			"version": "1.0.0",
 			"status":  "operational",
-			"phase":   "4 - The Dispatcher (All Phases Complete)",
+			"phase":   "5 - Reliability & Monitoring (Production Ready)",
 			"features": []string{
 				"Phase 1: Infrastructure Skeleton",
 				"Phase 2: Worker Node (Docker Execution)",
 				"Phase 3: Intelligence Layer (Carbon-Aware Scheduling)",
 				"Phase 4: The Dispatcher (Time-Based Job Promotion)",
+				"Phase 5: Reliability & Monitoring (Circuit Breaker, Metrics, Graceful Shutdown)",
 			},
 		})
 	})
