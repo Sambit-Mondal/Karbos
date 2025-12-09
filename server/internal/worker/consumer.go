@@ -20,6 +20,7 @@ type Consumer struct {
 	jobRepo       *database.JobRepository
 	executionRepo *database.ExecutionLogRepository
 	dockerService *docker.Service
+	pool          *Pool // Reference to parent pool for job tracking
 	stopCh        chan struct{}
 	workerID      string
 	pollInterval  time.Duration
@@ -39,11 +40,17 @@ func NewConsumer(
 		jobRepo:       jobRepo,
 		executionRepo: executionRepo,
 		dockerService: dockerService,
+		pool:          nil, // Will be set by pool after creation
 		stopCh:        make(chan struct{}),
 		workerID:      workerID,
 		pollInterval:  2 * time.Second,  // Poll every 2 seconds
 		jobTimeout:    10 * time.Minute, // 10 minute timeout per job
 	}
+}
+
+// SetPool sets the parent pool reference (called by pool after consumer creation)
+func (c *Consumer) SetPool(pool *Pool) {
+	c.pool = pool
 }
 
 // Start begins the consumer polling loop
@@ -80,6 +87,11 @@ func (c *Consumer) Stop() {
 
 // processNextJob attempts to dequeue and process one job
 func (c *Consumer) processNextJob(ctx context.Context) error {
+	// Check if pool is draining - stop accepting new jobs
+	if c.pool != nil && c.pool.IsDraining() {
+		return fmt.Errorf("worker pool is draining, not accepting new jobs")
+	}
+
 	// Dequeue from Redis
 	queueItem, err := c.queue.DequeueImmediate(ctx)
 	if err != nil {
@@ -121,6 +133,13 @@ func (c *Consumer) executeJob(ctx context.Context, jobID uuid.UUID) error {
 	}
 
 	log.Printf("[Worker %s] Job %s: Status updated to RUNNING", c.workerID, jobID)
+
+	// Track job start if pool is available
+	jobIDStr := jobID.String()
+	if c.pool != nil {
+		c.pool.TrackJobStart(jobIDStr)
+		defer c.pool.TrackJobComplete(jobIDStr)
+	}
 
 	// Execute Docker container
 	startTime := time.Now()

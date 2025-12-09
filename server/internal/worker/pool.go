@@ -13,15 +13,19 @@ import (
 
 // Pool manages multiple worker consumers running concurrently
 type Pool struct {
-	consumers     []*Consumer
-	size          int
-	queue         *queue.RedisQueue
-	jobRepo       *database.JobRepository
-	executionRepo *database.ExecutionLogRepository
-	dockerService *docker.Service
-	wg            sync.WaitGroup
-	ctx           context.Context
-	cancel        context.CancelFunc
+	consumers        []*Consumer
+	size             int
+	queue            *queue.RedisQueue
+	jobRepo          *database.JobRepository
+	executionRepo    *database.ExecutionLogRepository
+	dockerService    *docker.Service
+	wg               sync.WaitGroup
+	ctx              context.Context
+	cancel           context.CancelFunc
+	runningJobsMu    sync.Mutex
+	runningJobsWg    sync.WaitGroup  // Tracks active job executions
+	activeJobs       map[string]bool // Tracks which jobs are currently running
+	shutdownDraining bool            // Indicates if we're in graceful shutdown mode
 }
 
 // PoolConfig holds configuration for the worker pool
@@ -58,14 +62,16 @@ func NewPool(config PoolConfig) (*Pool, error) {
 	ctx, cancel := context.WithCancel(context.Background())
 
 	pool := &Pool{
-		size:          config.Size,
-		queue:         config.Queue,
-		jobRepo:       config.JobRepo,
-		executionRepo: config.ExecutionRepo,
-		dockerService: config.DockerService,
-		consumers:     make([]*Consumer, 0, config.Size),
-		ctx:           ctx,
-		cancel:        cancel,
+		size:             config.Size,
+		queue:            config.Queue,
+		jobRepo:          config.JobRepo,
+		executionRepo:    config.ExecutionRepo,
+		dockerService:    config.DockerService,
+		consumers:        make([]*Consumer, 0, config.Size),
+		ctx:              ctx,
+		cancel:           cancel,
+		activeJobs:       make(map[string]bool),
+		shutdownDraining: false,
 	}
 
 	return pool, nil
@@ -87,6 +93,9 @@ func (p *Pool) Start() error {
 			workerID,
 		)
 
+		// Set pool reference for job tracking
+		consumer.SetPool(p)
+
 		p.consumers = append(p.consumers, consumer)
 
 		// Start consumer in its own goroutine
@@ -107,13 +116,68 @@ func (p *Pool) Start() error {
 func (p *Pool) Stop() {
 	log.Println("Stopping worker pool...")
 
-	// Cancel context to signal all workers to stop
+	// Mark as draining - workers will stop accepting new jobs
+	p.runningJobsMu.Lock()
+	p.shutdownDraining = true
+	activeJobCount := len(p.activeJobs)
+	p.runningJobsMu.Unlock()
+
+	if activeJobCount > 0 {
+		log.Printf("⏳ Waiting for %d running container(s) to complete...", activeJobCount)
+	}
+
+	// Wait for all active jobs to complete (with timeout handled by caller)
+	p.runningJobsWg.Wait()
+
+	if activeJobCount > 0 {
+		log.Println("✓ All running containers completed")
+	}
+
+	// Now cancel context to stop worker polling loops
 	p.cancel()
 
-	// Wait for all workers to finish their current jobs
+	// Wait for all workers to finish
 	p.wg.Wait()
 
 	log.Println("Worker pool stopped successfully")
+}
+
+// TrackJobStart registers a job as currently running
+func (p *Pool) TrackJobStart(jobID string) {
+	p.runningJobsMu.Lock()
+	defer p.runningJobsMu.Unlock()
+
+	if !p.activeJobs[jobID] {
+		p.activeJobs[jobID] = true
+		p.runningJobsWg.Add(1)
+		log.Printf("📦 Container started for job: %s (active: %d)", jobID, len(p.activeJobs))
+	}
+}
+
+// TrackJobComplete unregisters a job after completion
+func (p *Pool) TrackJobComplete(jobID string) {
+	p.runningJobsMu.Lock()
+	defer p.runningJobsMu.Unlock()
+
+	if p.activeJobs[jobID] {
+		delete(p.activeJobs, jobID)
+		p.runningJobsWg.Done()
+		log.Printf("✓ Container completed for job: %s (active: %d)", jobID, len(p.activeJobs))
+	}
+}
+
+// IsDraining returns true if the pool is in graceful shutdown mode
+func (p *Pool) IsDraining() bool {
+	p.runningJobsMu.Lock()
+	defer p.runningJobsMu.Unlock()
+	return p.shutdownDraining
+}
+
+// GetActiveJobCount returns the number of currently running jobs
+func (p *Pool) GetActiveJobCount() int {
+	p.runningJobsMu.Lock()
+	defer p.runningJobsMu.Unlock()
+	return len(p.activeJobs)
 }
 
 // Wait blocks until all workers have stopped
