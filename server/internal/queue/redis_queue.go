@@ -278,3 +278,13 @@ func (q *RedisQueue) GetDelayedQueueStats(ctx context.Context) (map[string]inter
 
 	return stats, nil
 }
+
+// GetQueueLength returns the length of the immediate queue (alias for metrics)
+func (q *RedisQueue) GetQueueLength(ctx context.Context) (int64, error) {
+	return q.GetImmediateQueueLength(ctx)
+}
+
+// GetDelayedJobsCount returns the count of delayed jobs (alias for metrics)
+func (q *RedisQueue) GetDelayedJobsCount(ctx context.Context) (int64, error) {
+	return q.GetDelayedQueueLength(ctx)
+}
