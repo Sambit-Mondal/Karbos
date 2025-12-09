@@ -10,14 +10,16 @@ import (
 
 // Config holds all application configuration
 type Config struct {
-	Server   ServerConfig
-	Database DatabaseConfig
-	Redis    RedisConfig
-	Queue    QueueConfig
-	Worker   WorkerConfig
-	Docker   DockerConfig
-	Carbon   CarbonConfig
-	Promoter PromoterConfig
+	Server         ServerConfig
+	Database       DatabaseConfig
+	Redis          RedisConfig
+	Queue          QueueConfig
+	Worker         WorkerConfig
+	Docker         DockerConfig
+	Carbon         CarbonConfig
+	Promoter       PromoterConfig
+	CircuitBreaker CircuitBreakerConfig
+	Metrics        MetricsConfig
 }
 
 // ServerConfig holds server-specific configuration
@@ -57,6 +59,20 @@ type CarbonConfig struct {
 // PromoterConfig holds delayed job promoter configuration
 type PromoterConfig struct {
 	CheckInterval string // How often to check for ready jobs (default "10s")
+}
+
+// CircuitBreakerConfig holds circuit breaker configuration
+type CircuitBreakerConfig struct {
+	MaxFailures    int    // Number of failures before opening circuit (default 5)
+	Timeout        string // How long to wait before trying again (default "30s")
+	ResetTimeout   string // How long to stay in half-open before closing (default "10s")
+	StaticFallback string // Static carbon intensity value when circuit is open (default "400.0")
+}
+
+// MetricsConfig holds metrics exposure configuration
+type MetricsConfig struct {
+	Enabled bool   // Enable Prometheus metrics (default true)
+	Port    string // Metrics endpoint port (default "9090")
 }
 
 // DatabaseConfig holds database connection configuration
@@ -128,6 +144,16 @@ func LoadConfig() (*Config, error) {
 		Promoter: PromoterConfig{
 			CheckInterval: getEnv("PROMOTER_CHECK_INTERVAL", "10s"),
 		},
+		CircuitBreaker: CircuitBreakerConfig{
+			MaxFailures:    getEnvAsInt("CIRCUIT_BREAKER_MAX_FAILURES", 5),
+			Timeout:        getEnv("CIRCUIT_BREAKER_TIMEOUT", "30s"),
+			ResetTimeout:   getEnv("CIRCUIT_BREAKER_RESET_TIMEOUT", "10s"),
+			StaticFallback: getEnv("CIRCUIT_BREAKER_STATIC_FALLBACK", "400.0"),
+		},
+		Metrics: MetricsConfig{
+			Enabled: getEnvAsBool("METRICS_ENABLED", true),
+			Port:    getEnv("METRICS_PORT", "9090"),
+		},
 	}
 
 	// Validate required configuration
@@ -173,6 +199,15 @@ func getEnvAsInt64(key string, defaultValue int64) int64 {
 		return defaultValue
 	}
 	return intValue
+}
+
+// getEnvAsBool retrieves an environment variable as bool or returns default
+func getEnvAsBool(key string, defaultValue bool) bool {
+	value := os.Getenv(key)
+	if value == "" {
+		return defaultValue
+	}
+	return value == "true" || value == "1" || value == "yes"
 }
 
 // IsDevelopment returns true if running in development mode
