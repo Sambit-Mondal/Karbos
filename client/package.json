@@ -21,8 +21,8 @@
     "tailwindcss"
   ],
   "engines": {
-    "node": ">=18.18.0",
-    "npm": ">=9.0.0"
+    "node": ">=20.19.2",
+    "npm": ">=10.8.2"
   },
   "scripts": {
     "dev": "next dev",
