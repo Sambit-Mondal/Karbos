@@ -27,6 +27,11 @@ build-worker: ## Build the worker binary
 build-all: build build-worker ## Build both server and worker binaries
 	@echo "$(GREEN)✓ All binaries built$(NC)"
 
+build-seeder: ## Build the demo data seeder
+	@echo "$(GREEN)Building demo data seeder...$(NC)"
+	go build -o bin/karbos-seeder cmd/seeder/main.go
+	@echo "$(GREEN)✓ Build complete: bin/karbos-seeder$(NC)"
+
 run: ## Run the server
 	@echo "$(GREEN)Starting Karbos server...$(NC)"
 	go run cmd/api/main.go
@@ -34,6 +39,11 @@ run: ## Run the server
 run-worker: ## Run the worker
 	@echo "$(GREEN)Starting Karbos worker...$(NC)"
 	go run cmd/worker/main.go
+
+seed-demo: ## Seed demo data (50 historical jobs + 5 active jobs)
+	@echo "$(GREEN)Seeding demo data...$(NC)"
+	@echo "$(YELLOW)Note: Ensure database is set up and API server will be running$(NC)"
+	go run cmd/seeder/main.go
 
 dev: ## Run with auto-reload (requires air: go install github.com/cosmtrek/air@latest)
 	@echo "$(GREEN)Starting development server with auto-reload...$(NC)"
