@@ -4,7 +4,7 @@
   "private": true,
   "description": "Karbos client application built with Next.js",
   "author": "Sambit-Mondal",
-  "license": "MIT",
+  "license": "Apache-2.0",
   "repository": {
     "type": "git",
     "url": "https://github.com/Sambit-Mondal/Karbos.git",
