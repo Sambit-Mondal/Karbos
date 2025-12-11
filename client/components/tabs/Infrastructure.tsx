@@ -1,444 +1,369 @@
 "use client";
 
-"use client";
-
 import React from "react";
 import { motion } from "framer-motion";
-
-interface WorkerNode {
-  id: string;
-  name: string;
-  status: "online" | "offline" | "busy";
-  lastHeartbeat: string;
-  jobsProcessed: number;
-  cpuUsage: number;
-  memoryUsage: number;
-}
+import useSWR from "swr";
+import { apiClient } from "@/lib/api";
+import type { SystemHealthResponse } from "@/lib/types";
+import { 
+  Server, 
+  Activity, 
+  Clock,
+  Database,
+  TrendingUp,
+  Zap,
+  AlertCircle,
+  CheckCircle2
+} from "lucide-react";
+import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Cell } from "recharts";
 
 const Infrastructure = () => {
-  // Mock data for worker nodes
-  const workerNodes: WorkerNode[] = [
+  // Poll every 3 seconds for real-time updates
+  const { data: health, error, isLoading } = useSWR<SystemHealthResponse>(
+    '/api/system/health',
+    () => apiClient.getSystemHealth(),
     {
-      id: "node-01",
-      name: "worker-us-east-1a",
-      status: "online",
-      lastHeartbeat: "2025-12-04T14:45:23",
-      jobsProcessed: 47,
-      cpuUsage: 23,
-      memoryUsage: 45,
-    },
-    {
-      id: "node-02",
-      name: "worker-us-east-1b",
-      status: "busy",
-      lastHeartbeat: "2025-12-04T14:45:20",
-      jobsProcessed: 62,
-      cpuUsage: 87,
-      memoryUsage: 72,
-    },
-    {
-      id: "node-03",
-      name: "worker-us-west-2a",
-      status: "online",
-      lastHeartbeat: "2025-12-04T14:45:18",
-      jobsProcessed: 34,
-      cpuUsage: 15,
-      memoryUsage: 38,
-    },
-    {
-      id: "node-04",
-      name: "worker-eu-central-1a",
-      status: "offline",
-      lastHeartbeat: "2025-12-04T14:12:45",
-      jobsProcessed: 28,
-      cpuUsage: 0,
-      memoryUsage: 0,
-    },
-    {
-      id: "node-05",
-      name: "worker-eu-central-1b",
-      status: "online",
-      lastHeartbeat: "2025-12-04T14:45:22",
-      jobsProcessed: 51,
-      cpuUsage: 41,
-      memoryUsage: 56,
-    },
-    {
-      id: "node-06",
-      name: "worker-ap-southeast-1a",
-      status: "busy",
-      lastHeartbeat: "2025-12-04T14:45:19",
-      jobsProcessed: 39,
-      cpuUsage: 93,
-      memoryUsage: 81,
-    },
-  ];
-
-  const queueData = {
-    ready: 12,
-    delayed: 8,
-    active: 5,
-    completed: 247,
-    failed: 3,
-  };
-
-  const getStatusColor = (status: WorkerNode["status"]) => {
-    switch (status) {
-      case "online":
-        return "bg-green-500";
-      case "busy":
-        return "bg-yellow-500";
-      case "offline":
-        return "bg-red-500";
+      refreshInterval: 3000,
+      revalidateOnFocus: true,
+      revalidateOnReconnect: true,
     }
-  };
+  );
 
-  const getStatusText = (status: WorkerNode["status"]) => {
-    switch (status) {
-      case "online":
-        return "text-green-400";
-      case "busy":
-        return "text-yellow-400";
-      case "offline":
-        return "text-red-400";
+  const queueData = health ? [
+    {
+      name: 'Immediate',
+      jobs: health.queue_depth_immediate,
+      color: '#FFD700', // Yellow/Gold
+    },
+    {
+      name: 'Delayed',
+      jobs: health.queue_depth_delayed,
+      color: '#8B5CF6', // Purple
     }
-  };
+  ] : [];
 
-  const formatLastSeen = (timestamp: string) => {
-    const now = new Date("2025-12-04T14:45:30"); // Mock current time
-    const then = new Date(timestamp);
-    const diff = Math.floor((now.getTime() - then.getTime()) / 1000);
+  if (error) {
+    return (
+      <div className="flex items-center justify-center h-96">
+        <div className="text-center">
+          <AlertCircle className="w-16 h-16 text-red-400 mx-auto mb-4" />
+          <p className="text-xl font-semibold text-white">Failed to load system health</p>
+          <p className="text-sm text-gray-400 mt-2">{error.message}</p>
+        </div>
+      </div>
+    );
+  }
 
-    if (diff < 60) return `${diff}s ago`;
-    if (diff < 3600) return `${Math.floor(diff / 60)}m ago`;
-    return `${Math.floor(diff / 3600)}h ago`;
-  };
+  if (isLoading || !health) {
+    return (
+      <div className="flex items-center justify-center h-96">
+        <div className="text-center">
+          <Activity className="w-16 h-16 text-karbos-blue-purple animate-pulse mx-auto mb-4" />
+          <p className="text-xl font-semibold text-white">Loading system health...</p>
+        </div>
+      </div>
+    );
+  }
+
+  const totalQueueDepth = health.queue_depth_immediate + health.queue_depth_delayed;
+  const isHealthy = health.active_workers > 0;
 
   return (
-    <motion.div 
+    <motion.div
       initial={{ opacity: 0 }}
       animate={{ opacity: 1 }}
       transition={{ duration: 0.5 }}
       className="space-y-6"
     >
       {/* Header */}
-      <div>
-        <h2 className="text-2xl font-bold text-karbos-light-blue">
-          Infrastructure
-        </h2>
-        <p className="text-karbos-lavender mt-1">
-          Monitor worker nodes and queue health
+      <div className="text-center">
+        <h2 className="text-3xl font-bold text-karbos-light-blue">Infrastructure Console</h2>
+        <p className="text-sm text-gray-400 mt-2">
+          Real-time monitoring of distributed worker nodes and job queues
         </p>
       </div>
 
-      {/* Queue Health */}
-      <div className="bg-karbos-indigo p-6 rounded-lg border border-karbos-blue-purple">
-        <h3 className="text-xl font-semibold text-karbos-light-blue mb-4">
-          Queue Health
-        </h3>
-
-        <div className="grid grid-cols-2 md:grid-cols-5 gap-4">
-          <div className="text-center">
-            <div className="relative w-32 h-32 mx-auto">
-              <svg className="w-full h-full transform -rotate-90">
-                <circle
-                  cx="64"
-                  cy="64"
-                  r="56"
-                  className="fill-none stroke-karbos-navy"
-                  strokeWidth="12"
-                />
-                <circle
-                  cx="64"
-                  cy="64"
-                  r="56"
-                  className="fill-none stroke-blue-500"
-                  strokeWidth="12"
-                  strokeDasharray={`${(queueData.ready / 50) * 352} ${352 - (queueData.ready / 50) * 352}`}
-                />
-              </svg>
-              <div className="absolute inset-0 flex flex-col items-center justify-center">
-                <span className="text-3xl font-bold text-karbos-light-blue">
-                  {queueData.ready}
-                </span>
-                <span className="text-xs text-karbos-lavender">jobs</span>
-              </div>
-            </div>
-            <p className="text-karbos-lavender mt-2 font-medium">Ready Queue</p>
-          </div>
-
-          <div className="text-center">
-            <div className="relative w-32 h-32 mx-auto">
-              <svg className="w-full h-full transform -rotate-90">
-                <circle
-                  cx="64"
-                  cy="64"
-                  r="56"
-                  className="fill-none stroke-karbos-navy"
-                  strokeWidth="12"
-                />
-                <circle
-                  cx="64"
-                  cy="64"
-                  r="56"
-                  className="fill-none stroke-yellow-500"
-                  strokeWidth="12"
-                  strokeDasharray={`${(queueData.delayed / 50) * 352} ${352 - (queueData.delayed / 50) * 352}`}
-                />
-              </svg>
-              <div className="absolute inset-0 flex flex-col items-center justify-center">
-                <span className="text-3xl font-bold text-karbos-light-blue">
-                  {queueData.delayed}
-                </span>
-                <span className="text-xs text-karbos-lavender">jobs</span>
-              </div>
-            </div>
-            <p className="text-karbos-lavender mt-2 font-medium">
-              Delayed Queue
-            </p>
-          </div>
-
-          <div className="text-center">
-            <div className="relative w-32 h-32 mx-auto">
-              <svg className="w-full h-full transform -rotate-90">
-                <circle
-                  cx="64"
-                  cy="64"
-                  r="56"
-                  className="fill-none stroke-karbos-navy"
-                  strokeWidth="12"
-                />
-                <circle
-                  cx="64"
-                  cy="64"
-                  r="56"
-                  className="fill-none stroke-green-500"
-                  strokeWidth="12"
-                  strokeDasharray={`${(queueData.active / 50) * 352} ${352 - (queueData.active / 50) * 352}`}
-                />
-              </svg>
-              <div className="absolute inset-0 flex flex-col items-center justify-center">
-                <span className="text-3xl font-bold text-karbos-light-blue">
-                  {queueData.active}
-                </span>
-                <span className="text-xs text-karbos-lavender">jobs</span>
-              </div>
-            </div>
-            <p className="text-karbos-lavender mt-2 font-medium">Active</p>
-          </div>
-
-          <div className="text-center">
-            <div className="relative w-32 h-32 mx-auto">
-              <svg className="w-full h-full transform -rotate-90">
-                <circle
-                  cx="64"
-                  cy="64"
-                  r="56"
-                  className="fill-none stroke-karbos-navy"
-                  strokeWidth="12"
-                />
-                <circle
-                  cx="64"
-                  cy="64"
-                  r="56"
-                  className="fill-none stroke-cyan-500"
-                  strokeWidth="12"
-                  strokeDasharray="352 0"
-                />
-              </svg>
-              <div className="absolute inset-0 flex flex-col items-center justify-center">
-                <span className="text-3xl font-bold text-karbos-light-blue">
-                  {queueData.completed}
-                </span>
-                <span className="text-xs text-karbos-lavender">jobs</span>
-              </div>
-            </div>
-            <p className="text-karbos-lavender mt-2 font-medium">Completed</p>
-          </div>
-
-          <div className="text-center">
-            <div className="relative w-32 h-32 mx-auto">
-              <svg className="w-full h-full transform -rotate-90">
-                <circle
-                  cx="64"
-                  cy="64"
-                  r="56"
-                  className="fill-none stroke-karbos-navy"
-                  strokeWidth="12"
-                />
-                <circle
-                  cx="64"
-                  cy="64"
-                  r="56"
-                  className="fill-none stroke-red-500"
-                  strokeWidth="12"
-                  strokeDasharray={`${(queueData.failed / 50) * 352} ${352 - (queueData.failed / 50) * 352}`}
-                />
-              </svg>
-              <div className="absolute inset-0 flex flex-col items-center justify-center">
-                <span className="text-3xl font-bold text-karbos-light-blue">
-                  {queueData.failed}
-                </span>
-                <span className="text-xs text-karbos-lavender">jobs</span>
-              </div>
-            </div>
-            <p className="text-karbos-lavender mt-2 font-medium">Failed</p>
-          </div>
-        </div>
-      </div>
-
-      {/* Worker Nodes Grid */}
-      <div className="bg-karbos-indigo p-6 rounded-lg border border-karbos-blue-purple">
-        <div className="flex justify-between items-center mb-4">
-          <h3 className="text-xl font-semibold text-karbos-light-blue">
-            Worker Nodes
-          </h3>
-          <div className="flex items-center space-x-4 text-sm">
-            <div className="flex items-center space-x-2">
-              <div className="w-3 h-3 rounded-full bg-green-500"></div>
-              <span className="text-karbos-lavender">Online</span>
-            </div>
-            <div className="flex items-center space-x-2">
-              <div className="w-3 h-3 rounded-full bg-yellow-500"></div>
-              <span className="text-karbos-lavender">Busy</span>
-            </div>
-            <div className="flex items-center space-x-2">
-              <div className="w-3 h-3 rounded-full bg-red-500"></div>
-              <span className="text-karbos-lavender">Offline</span>
-            </div>
-          </div>
-        </div>
-
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-          {workerNodes.map((node, index) => (
-            <motion.div
-              key={node.id}
-              initial={{ opacity: 0, y: 20 }}
-              animate={{ opacity: 1, y: 0 }}
-              transition={{ duration: 0.3, delay: index * 0.05 }}
-              whileHover={{ scale: 1.02, y: -4 }}
-              className="bg-karbos-navy p-4 rounded-lg border border-karbos-blue-purple hover:border-karbos-lavender transition-colors"
-            >
-              <div className="flex items-start justify-between mb-3">
-                <div>
-                  <h4 className="text-karbos-light-blue font-semibold">
-                    {node.name}
-                  </h4>
-                  <p className="text-xs text-karbos-lavender font-mono">
-                    {node.id}
-                  </p>
-                </div>
-                <motion.div
-                  animate={{ scale: [1, 1.2, 1] }}
-                  transition={{ duration: 2, repeat: Infinity, delay: index * 0.2 }}
-                  className={`w-3 h-3 rounded-full ${getStatusColor(node.status)}`}
-                />
-              </div>
-
-              <div className="space-y-2 mb-3">
-                <div className="flex justify-between text-sm">
-                  <span className="text-karbos-lavender">Status:</span>
-                  <span
-                    className={`font-medium capitalize ${getStatusText(node.status)}`}
-                  >
-                    {node.status}
-                  </span>
-                </div>
-                <div className="flex justify-between text-sm">
-                  <span className="text-karbos-lavender">Jobs Processed:</span>
-                  <span className="text-karbos-light-blue font-medium">
-                    {node.jobsProcessed}
-                  </span>
-                </div>
-                <div className="flex justify-between text-sm">
-                  <span className="text-karbos-lavender">Last Heartbeat:</span>
-                  <span className="text-karbos-light-blue font-medium">
-                    {formatLastSeen(node.lastHeartbeat)}
-                  </span>
-                </div>
-              </div>
-
-              <div className="space-y-2">
-                <div>
-                  <div className="flex justify-between text-xs text-karbos-lavender mb-1">
-                    <span>CPU</span>
-                    <span>{node.cpuUsage}%</span>
-                  </div>
-                  <div className="w-full bg-karbos-indigo rounded-full h-2">
-                    <div
-                      className={`h-2 rounded-full transition-all ${
-                        node.cpuUsage > 80
-                          ? "bg-red-500"
-                          : node.cpuUsage > 50
-                            ? "bg-yellow-500"
-                            : "bg-green-500"
-                      }`}
-                      style={{ width: `${node.cpuUsage}%` }}
-                    />
-                  </div>
-                </div>
-                <div>
-                  <div className="flex justify-between text-xs text-karbos-lavender mb-1">
-                    <span>Memory</span>
-                    <span>{node.memoryUsage}%</span>
-                  </div>
-                  <div className="w-full bg-karbos-indigo rounded-full h-2">
-                    <div
-                      className={`h-2 rounded-full transition-all ${
-                        node.memoryUsage > 80
-                          ? "bg-red-500"
-                          : node.memoryUsage > 50
-                            ? "bg-yellow-500"
-                            : "bg-green-500"
-                      }`}
-                      style={{ width: `${node.memoryUsage}%` }}
-                    />
-                  </div>
-                </div>
-              </div>
-            </motion.div>
-          ))}
-        </div>
-      </div>
-
-      {/* System Metrics */}
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-        <div className="bg-karbos-indigo p-6 rounded-lg border border-karbos-blue-purple">
-          <h4 className="text-karbos-lavender text-sm font-medium mb-2">
-            Total Nodes
-          </h4>
-          <p className="text-3xl font-bold text-karbos-light-blue">
-            {workerNodes.length}
-          </p>
-          <p className="text-sm text-green-400 mt-1">
-            {workerNodes.filter((n) => n.status !== "offline").length} active
-          </p>
-        </div>
-
-        <div className="bg-karbos-indigo p-6 rounded-lg border border-karbos-blue-purple">
-          <h4 className="text-karbos-lavender text-sm font-medium mb-2">
-            Total Jobs Processed
-          </h4>
-          <p className="text-3xl font-bold text-karbos-light-blue">
-            {workerNodes.reduce((sum, node) => sum + node.jobsProcessed, 0)}
-          </p>
-          <p className="text-sm text-blue-400 mt-1">Across all nodes</p>
-        </div>
-
-        <div className="bg-karbos-indigo p-6 rounded-lg border border-karbos-blue-purple">
-          <h4 className="text-karbos-lavender text-sm font-medium mb-2">
-            Average CPU Usage
-          </h4>
-          <p className="text-3xl font-bold text-karbos-light-blue">
-            {Math.round(
-              workerNodes.reduce((sum, node) => sum + node.cpuUsage, 0) /
-                workerNodes.length,
+      {/* Status Banner */}
+      <motion.div
+        initial={{ opacity: 0, y: -10 }}
+        animate={{ opacity: 1, y: 0 }}
+        className={`rounded-lg p-4 border ${
+          isHealthy 
+            ? 'bg-green-500/10 border-green-500/20' 
+            : 'bg-red-500/10 border-red-500/20'
+        }`}
+      >
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-3">
+            {isHealthy ? (
+              <CheckCircle2 className="w-6 h-6 text-green-400" />
+            ) : (
+              <AlertCircle className="w-6 h-6 text-red-400" />
             )}
-            %
-          </p>
-          <p className="text-sm text-karbos-lavender mt-1">Cluster-wide</p>
+            <div>
+              <p className={`font-bold ${isHealthy ? 'text-green-400' : 'text-red-400'}`}>
+                System Status: {isHealthy ? 'Operational' : 'Degraded'}
+              </p>
+              <p className="text-sm text-gray-400">
+                Last updated: {new Date(health.timestamp).toLocaleTimeString()}
+              </p>
+            </div>
+          </div>
+          <div className="text-right">
+            <p className="text-sm text-gray-400">Auto-refresh: 3s</p>
+          </div>
         </div>
+      </motion.div>
+
+      {/* Metrics Cards */}
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+        {/* Active Workers Card */}
+        <motion.div
+          initial={{ opacity: 0, scale: 0.95 }}
+          animate={{ opacity: 1, scale: 1 }}
+          transition={{ delay: 0.1 }}
+          className="bg-karbos-dark-gray border border-green-500/20 rounded-lg p-6 relative overflow-hidden"
+        >
+          <div className="absolute top-0 right-0 w-32 h-32 bg-green-500/5 rounded-full blur-3xl" />
+          <div className="relative">
+            <div className="flex items-center justify-between mb-4">
+              <Server className="w-8 h-8 text-green-400" />
+              <span className={`px-3 py-1 rounded-full text-xs font-semibold ${
+                health.active_workers > 0 
+                  ? 'bg-green-500/20 text-green-400' 
+                  : 'bg-red-500/20 text-red-400'
+              }`}>
+                {health.active_workers > 0 ? 'ONLINE' : 'OFFLINE'}
+              </span>
+            </div>
+            <p className="text-5xl font-bold text-white mb-2">{health.active_workers}</p>
+            <p className="text-sm text-gray-400">Active Worker Nodes</p>
+          </div>
+        </motion.div>
+
+        {/* Pending Jobs Card */}
+        <motion.div
+          initial={{ opacity: 0, scale: 0.95 }}
+          animate={{ opacity: 1, scale: 1 }}
+          transition={{ delay: 0.2 }}
+          className="bg-karbos-dark-gray border border-yellow-500/20 rounded-lg p-6 relative overflow-hidden"
+        >
+          <div className="absolute top-0 right-0 w-32 h-32 bg-yellow-500/5 rounded-full blur-3xl" />
+          <div className="relative">
+            <div className="flex items-center justify-between mb-4">
+              <TrendingUp className="w-8 h-8 text-yellow-400" />
+              <span className={`px-3 py-1 rounded-full text-xs font-semibold ${
+                totalQueueDepth > 50 
+                  ? 'bg-red-500/20 text-red-400' 
+                  : totalQueueDepth > 20
+                    ? 'bg-yellow-500/20 text-yellow-400'
+                    : 'bg-green-500/20 text-green-400'
+              }`}>
+                {totalQueueDepth > 50 ? 'HIGH' : totalQueueDepth > 20 ? 'MEDIUM' : 'LOW'}
+              </span>
+            </div>
+            <p className="text-5xl font-bold text-white mb-2">{totalQueueDepth}</p>
+            <p className="text-sm text-gray-400">Total Pending Jobs</p>
+            <div className="flex gap-4 mt-3 text-xs">
+              <span className="text-yellow-400">⚡ {health.queue_depth_immediate} Immediate</span>
+              <span className="text-purple-400">⏰ {health.queue_depth_delayed} Delayed</span>
+            </div>
+          </div>
+        </motion.div>
+
+        {/* Redis Latency Card */}
+        <motion.div
+          initial={{ opacity: 0, scale: 0.95 }}
+          animate={{ opacity: 1, scale: 1 }}
+          transition={{ delay: 0.3 }}
+          className="bg-karbos-dark-gray border border-blue-500/20 rounded-lg p-6 relative overflow-hidden"
+        >
+          <div className="absolute top-0 right-0 w-32 h-32 bg-blue-500/5 rounded-full blur-3xl" />
+          <div className="relative">
+            <div className="flex items-center justify-between mb-4">
+              <Database className="w-8 h-8 text-blue-400" />
+              <span className={`px-3 py-1 rounded-full text-xs font-semibold ${
+                health.redis_latency_ms < 5 
+                  ? 'bg-green-500/20 text-green-400' 
+                  : health.redis_latency_ms < 20
+                    ? 'bg-yellow-500/20 text-yellow-400'
+                    : 'bg-red-500/20 text-red-400'
+              }`}>
+                {health.redis_latency_ms < 5 ? 'FAST' : health.redis_latency_ms < 20 ? 'NORMAL' : 'SLOW'}
+              </span>
+            </div>
+            <div className="flex items-baseline gap-2">
+              <p className="text-5xl font-bold text-white">{health.redis_latency_ms}</p>
+              <span className="text-xl text-gray-400">ms</span>
+            </div>
+            <p className="text-sm text-gray-400 mt-2">Redis Ping Latency</p>
+          </div>
+        </motion.div>
       </div>
+
+      {/* Node Grid Section */}
+      <motion.div
+        initial={{ opacity: 0, y: 20 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={{ delay: 0.4 }}
+        className="bg-karbos-dark-gray border border-karbos-blue-purple/20 rounded-lg p-6"
+      >
+        <div className="flex items-center gap-2 mb-6">
+          <Server className="w-6 h-6 text-karbos-blue-purple" />
+          <h3 className="text-xl font-semibold text-white">Worker Node Fleet</h3>
+          <span className="ml-auto text-sm text-gray-400">
+            {health.active_workers} / {health.active_workers} nodes online
+          </span>
+        </div>
+
+        {health.active_workers === 0 ? (
+          <div className="text-center py-12">
+            <Server className="w-16 h-16 text-gray-600 mx-auto mb-4" />
+            <p className="text-lg text-gray-400">No active worker nodes</p>
+            <p className="text-sm text-gray-500 mt-2">Start a worker to see it appear here</p>
+          </div>
+        ) : (
+          <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 gap-4">
+            {health.worker_ids.map((workerId, index) => (
+              <motion.div
+                key={workerId}
+                initial={{ opacity: 0, scale: 0.8 }}
+                animate={{ opacity: 1, scale: 1 }}
+                transition={{ delay: 0.5 + index * 0.05 }}
+                className="bg-karbos-dark-gray/50 border border-green-500/30 rounded-lg p-4 flex flex-col items-center justify-center relative group hover:border-green-500/60 transition-all"
+              >
+                {/* Pulse animation */}
+                <div className="absolute inset-0 rounded-lg bg-green-500/10 animate-pulse" />
+                
+                <div className="relative">
+                  <Server className="w-10 h-10 text-green-400 mb-2" />
+                  <div className="absolute -top-1 -right-1 w-3 h-3 bg-green-400 rounded-full animate-ping" />
+                  <div className="absolute -top-1 -right-1 w-3 h-3 bg-green-400 rounded-full" />
+                </div>
+                
+                <p className="text-xs text-gray-400 mt-2 text-center break-all">
+                  {workerId.substring(0, 8)}...
+                </p>
+                
+                {/* Tooltip on hover */}
+                <div className="absolute bottom-full left-1/2 transform -translate-x-1/2 mb-2 px-2 py-1 bg-black/90 text-white text-xs rounded opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap pointer-events-none z-10">
+                  {workerId}
+                </div>
+              </motion.div>
+            ))}
+          </div>
+        )}
+      </motion.div>
+
+      {/* Queue Visualization */}
+      <motion.div
+        initial={{ opacity: 0, y: 20 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={{ delay: 0.5 }}
+        className="bg-karbos-dark-gray border border-karbos-blue-purple/20 rounded-lg p-6"
+      >
+        <div className="flex items-center gap-2 mb-6">
+          <Activity className="w-6 h-6 text-karbos-blue-purple" />
+          <h3 className="text-xl font-semibold text-white">Queue Visualization</h3>
+        </div>
+
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+          {/* Bar Chart */}
+          <div>
+            <h4 className="text-sm font-semibold text-gray-400 mb-4">Queue Depth Comparison</h4>
+            <ResponsiveContainer width="100%" height={300}>
+              <BarChart data={queueData}>
+                <CartesianGrid strokeDasharray="3 3" stroke="#374151" />
+                <XAxis 
+                  dataKey="name" 
+                  stroke="#9CA3AF"
+                  style={{ fontSize: '14px' }}
+                />
+                <YAxis 
+                  stroke="#9CA3AF"
+                  style={{ fontSize: '14px' }}
+                />
+                <Tooltip
+                  contentStyle={{
+                    backgroundColor: '#1F2937',
+                    border: '1px solid #374151',
+                    borderRadius: '8px',
+                    color: '#fff'
+                  }}
+                  cursor={{ fill: 'rgba(139, 92, 246, 0.1)' }}
+                />
+                <Bar dataKey="jobs" radius={[8, 8, 0, 0]}>
+                  {queueData.map((entry, index) => (
+                    <Cell key={`cell-${index}`} fill={entry.color} />
+                  ))}
+                </Bar>
+              </BarChart>
+            </ResponsiveContainer>
+          </div>
+
+          {/* Queue Stats Cards */}
+          <div className="space-y-4">
+            <div className="bg-karbos-dark-gray/50 border border-yellow-500/20 rounded-lg p-4">
+              <div className="flex items-center justify-between mb-2">
+                <div className="flex items-center gap-2">
+                  <Zap className="w-5 h-5 text-yellow-400" />
+                  <h4 className="text-sm font-semibold text-gray-300">Immediate Queue</h4>
+                </div>
+                <span className="text-2xl font-bold text-yellow-400">
+                  {health.queue_depth_immediate}
+                </span>
+              </div>
+              <p className="text-xs text-gray-500">
+                Jobs scheduled to run immediately (FIFO)
+              </p>
+            </div>
+
+            <div className="bg-karbos-dark-gray/50 border border-purple-500/20 rounded-lg p-4">
+              <div className="flex items-center justify-between mb-2">
+                <div className="flex items-center gap-2">
+                  <Clock className="w-5 h-5 text-purple-400" />
+                  <h4 className="text-sm font-semibold text-gray-300">Delayed Queue</h4>
+                </div>
+                <span className="text-2xl font-bold text-purple-400">
+                  {health.queue_depth_delayed}
+                </span>
+              </div>
+              <p className="text-xs text-gray-500">
+                Carbon-aware jobs waiting for optimal time
+              </p>
+            </div>
+
+            <div className="bg-karbos-dark-gray/50 border border-blue-500/20 rounded-lg p-4">
+              <div className="flex items-center justify-between mb-2">
+                <div className="flex items-center gap-2">
+                  <TrendingUp className="w-5 h-5 text-blue-400" />
+                  <h4 className="text-sm font-semibold text-gray-300">Total Workload</h4>
+                </div>
+                <span className="text-2xl font-bold text-blue-400">
+                  {totalQueueDepth}
+                </span>
+              </div>
+              <p className="text-xs text-gray-500">
+                Combined jobs across all queues
+              </p>
+            </div>
+          </div>
+        </div>
+      </motion.div>
+
+      {/* System Info Footer */}
+      <motion.div
+        initial={{ opacity: 0 }}
+        animate={{ opacity: 1 }}
+        transition={{ delay: 0.6 }}
+        className="bg-blue-500/10 border border-blue-500/20 rounded-lg p-4"
+      >
+        <p className="text-sm text-gray-300">
+          <strong className="text-blue-400">📊 Real-time Monitoring:</strong> This dashboard updates every 3 seconds. 
+          Worker nodes send heartbeats every 10 seconds with a 15-second TTL. 
+          Queue depths are queried directly from Redis (LLEN for immediate, ZCARD for delayed).
+        </p>
+      </motion.div>
     </motion.div>
   );
 };
