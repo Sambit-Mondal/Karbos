@@ -30,10 +30,10 @@ func (w *DatabaseCacheWrapper) GetCarbonIntensity(ctx context.Context, region st
 	return &CarbonCacheEntry{
 		Region:    dbEntry.Region,
 		Timestamp: dbEntry.Timestamp,
-		Intensity: dbEntry.Intensity,
-		Unit:      dbEntry.Unit,
-		FetchedAt: dbEntry.FetchedAt,
-		ExpiresAt: dbEntry.ExpiresAt,
+		Intensity: dbEntry.IntensityValue,
+		Unit:      "gCO2/kWh",
+		FetchedAt: dbEntry.CreatedAt,
+		ExpiresAt: dbEntry.CreatedAt.Add(24 * time.Hour), // Default 24h expiry
 	}, nil
 }
 
@@ -49,10 +49,10 @@ func (w *DatabaseCacheWrapper) GetCarbonForecast(ctx context.Context, region str
 		entries = append(entries, CarbonCacheEntry{
 			Region:    dbEntry.Region,
 			Timestamp: dbEntry.Timestamp,
-			Intensity: dbEntry.Intensity,
-			Unit:      dbEntry.Unit,
-			FetchedAt: dbEntry.FetchedAt,
-			ExpiresAt: dbEntry.ExpiresAt,
+			Intensity: dbEntry.IntensityValue,
+			Unit:      "gCO2/kWh",
+			FetchedAt: dbEntry.CreatedAt,
+			ExpiresAt: dbEntry.CreatedAt.Add(24 * time.Hour), // Default 24h expiry
 		})
 	}
 
@@ -81,8 +81,7 @@ func (w *DatabaseCacheWrapper) BulkSaveCarbonIntensities(ctx context.Context, da
 // IsCacheFresh checks if cached data is still fresh
 func (w *DatabaseCacheWrapper) IsCacheFresh(entry *CarbonCacheEntry, maxAge time.Duration) bool {
 	dbEntry := &database.CarbonCacheEntry{
-		FetchedAt: entry.FetchedAt,
-		ExpiresAt: entry.ExpiresAt,
+		CreatedAt: entry.FetchedAt,
 	}
 	return w.repo.IsCacheFresh(dbEntry, maxAge)
 }

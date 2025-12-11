@@ -21,13 +21,13 @@ func NewCarbonCacheRepository(db *DB) *CarbonCacheRepository {
 
 // CarbonCacheEntry represents a cached carbon intensity record
 type CarbonCacheEntry struct {
-	ID        uuid.UUID `json:"id"`
-	Region    string    `json:"region"`
-	Timestamp time.Time `json:"timestamp"`
-	Intensity float64   `json:"intensity"`
-	Unit      string    `json:"unit"`
-	FetchedAt time.Time `json:"fetched_at"`
-	ExpiresAt time.Time `json:"expires_at"`
+	ID             uuid.UUID `json:"id"`
+	Region         string    `json:"region"`
+	Timestamp      time.Time `json:"timestamp"`
+	IntensityValue float64   `json:"intensity_value"`
+	ForecastWindow *int      `json:"forecast_window,omitempty"`
+	Source         *string   `json:"source,omitempty"`
+	CreatedAt      time.Time `json:"created_at"`
 }
 
 // CarbonIntensity is a local type for saving data (avoids circular import)
@@ -41,28 +41,23 @@ type CarbonIntensity struct {
 // SaveCarbonIntensity saves carbon intensity data to cache
 func (r *CarbonCacheRepository) SaveCarbonIntensity(ctx context.Context, region string, timestamp time.Time, intensity float64, unit string, ttl time.Duration) error {
 	query := `
-		INSERT INTO carbon_cache (id, region, timestamp, intensity, unit, fetched_at, expires_at)
-		VALUES ($1, $2, $3, $4, $5, $6, $7)
-		ON CONFLICT (region, timestamp) 
+		INSERT INTO carbon_cache (id, region, timestamp, intensity_value, source)
+		VALUES ($1, $2, $3, $4, $5)
+		ON CONFLICT (region, timestamp, forecast_window) 
 		DO UPDATE SET 
-			intensity = EXCLUDED.intensity,
-			unit = EXCLUDED.unit,
-			fetched_at = EXCLUDED.fetched_at,
-			expires_at = EXCLUDED.expires_at
+			intensity_value = EXCLUDED.intensity_value,
+			source = EXCLUDED.source
 	`
 
 	id := uuid.New()
-	now := time.Now()
-	expiresAt := now.Add(ttl)
+	source := "api"
 
 	_, err := r.db.ExecContext(ctx, query,
 		id,
 		region,
 		timestamp,
 		intensity,
-		unit,
-		now,
-		expiresAt,
+		&source,
 	)
 
 	if err != nil {
@@ -75,12 +70,11 @@ func (r *CarbonCacheRepository) SaveCarbonIntensity(ctx context.Context, region 
 // GetCarbonIntensity retrieves cached carbon intensity data
 func (r *CarbonCacheRepository) GetCarbonIntensity(ctx context.Context, region string, timestamp time.Time) (*CarbonCacheEntry, error) {
 	query := `
-		SELECT id, region, timestamp, intensity, unit, fetched_at, expires_at
+		SELECT id, region, timestamp, intensity_value, forecast_window, source, created_at
 		FROM carbon_cache
 		WHERE region = $1 
 			AND timestamp >= $2 - INTERVAL '15 minutes'
 			AND timestamp <= $2 + INTERVAL '15 minutes'
-			AND expires_at > NOW()
 		ORDER BY ABS(EXTRACT(EPOCH FROM (timestamp - $2)))
 		LIMIT 1
 	`
@@ -90,10 +84,10 @@ func (r *CarbonCacheRepository) GetCarbonIntensity(ctx context.Context, region s
 		&entry.ID,
 		&entry.Region,
 		&entry.Timestamp,
-		&entry.Intensity,
-		&entry.Unit,
-		&entry.FetchedAt,
-		&entry.ExpiresAt,
+		&entry.IntensityValue,
+		&entry.ForecastWindow,
+		&entry.Source,
+		&entry.CreatedAt,
 	)
 
 	if err == sql.ErrNoRows {
@@ -110,11 +104,10 @@ func (r *CarbonCacheRepository) GetCarbonIntensity(ctx context.Context, region s
 // GetCarbonForecast retrieves cached forecast data within a time range
 func (r *CarbonCacheRepository) GetCarbonForecast(ctx context.Context, region string, startTime, endTime time.Time) ([]CarbonCacheEntry, error) {
 	query := `
-		SELECT id, region, timestamp, intensity, unit, fetched_at, expires_at
+		SELECT id, region, timestamp, intensity_value, forecast_window, source, created_at
 		FROM carbon_cache
 		WHERE region = $1 
 			AND timestamp BETWEEN $2 AND $3
-			AND expires_at > NOW()
 		ORDER BY timestamp ASC
 	`
 
@@ -131,10 +124,10 @@ func (r *CarbonCacheRepository) GetCarbonForecast(ctx context.Context, region st
 			&entry.ID,
 			&entry.Region,
 			&entry.Timestamp,
-			&entry.Intensity,
-			&entry.Unit,
-			&entry.FetchedAt,
-			&entry.ExpiresAt,
+			&entry.IntensityValue,
+			&entry.ForecastWindow,
+			&entry.Source,
+			&entry.CreatedAt,
 		)
 		if err != nil {
 			return nil, fmt.Errorf("failed to scan carbon cache entry: %w", err)
@@ -147,14 +140,14 @@ func (r *CarbonCacheRepository) GetCarbonForecast(ctx context.Context, region st
 
 // IsCacheFresh checks if cached data is still fresh based on TTL
 func (r *CarbonCacheRepository) IsCacheFresh(entry *CarbonCacheEntry, maxAge time.Duration) bool {
-	return time.Since(entry.FetchedAt) < maxAge && time.Now().Before(entry.ExpiresAt)
+	return time.Since(entry.CreatedAt) < maxAge
 }
 
-// DeleteExpiredEntries removes expired cache entries
-func (r *CarbonCacheRepository) DeleteExpiredEntries(ctx context.Context) (int64, error) {
-	query := `DELETE FROM carbon_cache WHERE expires_at <= NOW()`
+// DeleteExpiredEntries removes expired cache entries older than maxAge
+func (r *CarbonCacheRepository) DeleteExpiredEntries(ctx context.Context, maxAge time.Duration) (int64, error) {
+	query := `DELETE FROM carbon_cache WHERE created_at <= NOW() - $1::INTERVAL`
 
-	result, err := r.db.ExecContext(ctx, query)
+	result, err := r.db.ExecContext(ctx, query, maxAge)
 	if err != nil {
 		return 0, fmt.Errorf("failed to delete expired cache entries: %w", err)
 	}
@@ -174,8 +167,8 @@ func (r *CarbonCacheRepository) GetCacheStats(ctx context.Context) (map[string]i
 	query := `
 		SELECT 
 			COUNT(*) as total,
-			COUNT(*) FILTER (WHERE expires_at > NOW()) as valid,
-			COUNT(*) FILTER (WHERE expires_at <= NOW()) as expired
+			COUNT(*) FILTER (WHERE created_at > NOW() - INTERVAL '24 hours') as valid,
+			COUNT(*) FILTER (WHERE created_at <= NOW() - INTERVAL '24 hours') as expired
 		FROM carbon_cache
 	`
 
@@ -206,14 +199,12 @@ func (r *CarbonCacheRepository) BulkSaveCarbonIntensities(ctx context.Context, d
 	defer tx.Rollback()
 
 	query := `
-		INSERT INTO carbon_cache (id, region, timestamp, intensity, unit, fetched_at, expires_at)
-		VALUES ($1, $2, $3, $4, $5, $6, $7)
-		ON CONFLICT (region, timestamp) 
+		INSERT INTO carbon_cache (id, region, timestamp, intensity_value, source)
+		VALUES ($1, $2, $3, $4, $5)
+		ON CONFLICT (region, timestamp, forecast_window) 
 		DO UPDATE SET 
-			intensity = EXCLUDED.intensity,
-			unit = EXCLUDED.unit,
-			fetched_at = EXCLUDED.fetched_at,
-			expires_at = EXCLUDED.expires_at
+			intensity_value = EXCLUDED.intensity_value,
+			source = EXCLUDED.source
 	`
 
 	stmt, err := tx.PrepareContext(ctx, query)
@@ -222,8 +213,7 @@ func (r *CarbonCacheRepository) BulkSaveCarbonIntensities(ctx context.Context, d
 	}
 	defer stmt.Close()
 
-	now := time.Now()
-	expiresAt := now.Add(ttl)
+	source := "api"
 
 	for _, entry := range data {
 		id := uuid.New()
@@ -232,9 +222,7 @@ func (r *CarbonCacheRepository) BulkSaveCarbonIntensities(ctx context.Context, d
 			entry.Region,
 			entry.Timestamp,
 			entry.Intensity,
-			entry.Unit,
-			now,
-			expiresAt,
+			&source,
 		)
 		if err != nil {
 			return fmt.Errorf("failed to save entry: %w", err)
@@ -246,4 +234,78 @@ func (r *CarbonCacheRepository) BulkSaveCarbonIntensities(ctx context.Context, d
 	}
 
 	return nil
+}
+
+// GetRecentEntries retrieves all carbon cache entries from the last N duration
+func (r *CarbonCacheRepository) GetRecentEntries(ctx context.Context, duration time.Duration) ([]CarbonCacheEntry, error) {
+	query := `
+		SELECT id, region, timestamp, intensity_value, forecast_window, source, created_at
+		FROM carbon_cache
+		WHERE timestamp >= NOW() - $1::interval
+		ORDER BY timestamp DESC
+		LIMIT 1000
+	`
+
+	rows, err := r.db.QueryContext(ctx, query, duration.String())
+	if err != nil {
+		return nil, fmt.Errorf("failed to get recent cache entries: %w", err)
+	}
+	defer rows.Close()
+
+	var entries []CarbonCacheEntry
+	for rows.Next() {
+		var entry CarbonCacheEntry
+		err := rows.Scan(
+			&entry.ID,
+			&entry.Region,
+			&entry.Timestamp,
+			&entry.IntensityValue,
+			&entry.ForecastWindow,
+			&entry.Source,
+			&entry.CreatedAt,
+		)
+		if err != nil {
+			return nil, fmt.Errorf("failed to scan carbon cache entry: %w", err)
+		}
+		entries = append(entries, entry)
+	}
+
+	return entries, nil
+}
+
+// GetCarbonIntensityRange retrieves carbon intensity data for a specific region within a time range
+func (r *CarbonCacheRepository) GetCarbonIntensityRange(ctx context.Context, region string, startTime, endTime time.Time) ([]CarbonCacheEntry, error) {
+	query := `
+		SELECT id, region, timestamp, intensity_value, forecast_window, source, created_at
+		FROM carbon_cache
+		WHERE region = $1 
+			AND timestamp BETWEEN $2 AND $3
+		ORDER BY timestamp ASC
+	`
+
+	rows, err := r.db.QueryContext(ctx, query, region, startTime, endTime)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get carbon intensity range: %w", err)
+	}
+	defer rows.Close()
+
+	var entries []CarbonCacheEntry
+	for rows.Next() {
+		var entry CarbonCacheEntry
+		err := rows.Scan(
+			&entry.ID,
+			&entry.Region,
+			&entry.Timestamp,
+			&entry.IntensityValue,
+			&entry.ForecastWindow,
+			&entry.Source,
+			&entry.CreatedAt,
+		)
+		if err != nil {
+			return nil, fmt.Errorf("failed to scan carbon cache entry: %w", err)
+		}
+		entries = append(entries, entry)
+	}
+
+	return entries, nil
 }
