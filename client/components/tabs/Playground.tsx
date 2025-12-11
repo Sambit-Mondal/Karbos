@@ -1,509 +1,512 @@
 "use client";
 
-import React, { useState } from "react";
-import { motion } from "framer-motion";
+import React, { useState, useEffect, useMemo, useCallback } from "react";
+import { motion, AnimatePresence } from "framer-motion";
+import useSWR from "swr";
+import { apiClient } from "@/lib/api";
+import type { CarbonForecastResponse, SubmitJobRequest, SubmitJobResponse } from "@/lib/types";
+import { 
+  Play, 
+  Loader, 
+  CheckCircle, 
+  AlertCircle,
+  TrendingDown,
+  Clock,
+  Leaf,
+  Zap,
+  Settings
+} from "lucide-react";
+import { useRouter } from "next/navigation";
 
-interface JobSubmission {
-  dockerImage: string;
-  command: string;
-  estimatedDuration: number;
-  slaDeadline: number;
-  simulationMode: boolean;
-}
+const DOCKER_IMAGES = [
+  { value: "python:3.9-slim", label: "Python 3.9 Slim", description: "Lightweight Python runtime" },
+  { value: "python:3.11-slim", label: "Python 3.11 Slim", description: "Latest Python 3.11" },
+  { value: "node:18-alpine", label: "Node.js 18 Alpine", description: "Minimal Node.js 18" },
+  { value: "node:20-alpine", label: "Node.js 20 Alpine", description: "Latest Node.js 20" },
+  { value: "alpine:latest", label: "Alpine Linux", description: "Minimal Linux distribution" },
+  { value: "golang:1.21-alpine", label: "Go 1.21 Alpine", description: "Go programming language" },
+  { value: "ubuntu:22.04", label: "Ubuntu 22.04", description: "Full Ubuntu environment" },
+  { value: "nginx:alpine", label: "Nginx Alpine", description: "Web server" },
+];
 
-interface SimulationResult {
-  immediateExecution: {
-    startTime: string;
-    carbonIntensity: number;
-    estimatedCO2: number;
-  };
-  optimizedExecution: {
-    startTime: string;
-    carbonIntensity: number;
-    estimatedCO2: number;
-    delaySavings: number;
-  };
-}
+const REGIONS = [
+  { value: "US-EAST", label: "US East (Virginia)" },
+  { value: "US-WEST", label: "US West (Oregon)" },
+  { value: "US-CENTRAL", label: "US Central" },
+  { value: "EU-WEST", label: "EU West" },
+  { value: "EU-CENTRAL", label: "EU Central" },
+  { value: "EU-NORTH", label: "EU North" },
+  { value: "ASIA-EAST", label: "Asia East" },
+  { value: "AU-EAST", label: "Australia East" },
+];
 
 const Playground = () => {
-  const [formData, setFormData] = useState<JobSubmission>({
-    dockerImage: "",
-    command: "",
-    estimatedDuration: 30,
-    slaDeadline: 4,
-    simulationMode: true,
-  });
-
-  const [simulationResult, setSimulationResult] =
-    useState<SimulationResult | null>(null);
+  const router = useRouter();
+  const [dockerImage, setDockerImage] = useState(DOCKER_IMAGES[0].value);
+  const [command, setCommand] = useState("echo 'Hello, Carbon-Aware World!'");
+  const [duration, setDuration] = useState(30); // minutes
+  const [deadlineHours, setDeadlineHours] = useState(4); // hours
+  const [region, setRegion] = useState("US-EAST");
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [showSuccess, setShowSuccess] = useState(false);
+  const [showError, setShowError] = useState(false);
+  const [errorMessage, setErrorMessage] = useState("");
+  const [prediction, setPrediction] = useState<SubmitJobResponse | null>(null);
 
-  const handleInputChange = (
-    e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>,
-  ) => {
-    const { name, value } = e.target;
-    setFormData((prev) => ({
-      ...prev,
-      [name]: value,
-    }));
-  };
+  // Fetch carbon forecast for selected region
+  const { data: carbonData } = useSWR<CarbonForecastResponse>(
+    `/api/carbon-forecast?region=${region}`,
+    () => apiClient.getCarbonForecast(region),
+    {
+      refreshInterval: 60000,
+    }
+  );
 
-  const handleSliderChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    setFormData((prev) => ({
-      ...prev,
-      slaDeadline: parseInt(e.target.value),
-    }));
-  };
+  // Calculate CO2 savings prediction client-side
+  const impactPrediction = useMemo(() => {
+    if (!carbonData?.forecasts || carbonData.forecasts.length === 0) {
+      return null;
+    }
 
-  const handleToggle = () => {
-    setFormData((prev) => ({
-      ...prev,
-      simulationMode: !prev.simulationMode,
-    }));
-  };
+    const now = new Date();
+    const deadlineTime = new Date(now.getTime() + deadlineHours * 60 * 60 * 1000);
+    
+    // Filter forecasts within deadline
+    const viableForecasts = carbonData.forecasts.filter(f => {
+      const forecastTime = new Date(f.timestamp);
+      return forecastTime >= now && forecastTime <= deadlineTime;
+    });
+
+    if (viableForecasts.length === 0) return null;
+
+    // Current intensity (now or nearest future)
+    const currentIntensity = viableForecasts[0]?.intensity_value || 300;
+    
+    // Find greenest window
+    const optimalWindow = viableForecasts.reduce((min, curr) => 
+      curr.intensity_value < min.intensity_value ? curr : min
+    );
+
+    const savingsPercent = ((currentIntensity - optimalWindow.intensity_value) / currentIntensity) * 100;
+    const co2Savings = ((currentIntensity - optimalWindow.intensity_value) * duration) / 60; // gCO2eq
+
+    return {
+      currentIntensity,
+      optimalIntensity: optimalWindow.intensity_value,
+      optimalTime: new Date(optimalWindow.timestamp),
+      savingsPercent: Math.max(0, savingsPercent),
+      co2Savings: Math.max(0, co2Savings),
+      isImmediate: savingsPercent < 10, // Less than 10% savings, run immediately
+    };
+  }, [carbonData, deadlineHours, duration]);
+
+  const handleDryRun = useCallback(async () => {
+    const deadline = new Date();
+    deadline.setHours(deadline.getHours() + deadlineHours);
+
+    const request: SubmitJobRequest = {
+      user_id: "playground-user",
+      docker_image: dockerImage,
+      command: [command],
+      deadline: deadline.toISOString(),
+      estimated_duration: duration * 60, // Convert to seconds
+      region: region,
+    };
+
+    try {
+      const result = await apiClient.submitJob(request, true); // dry_run = true
+      setPrediction(result);
+    } catch (error) {
+      console.error("Dry run failed:", error);
+      setPrediction(null);
+    }
+  }, [dockerImage, command, duration, deadlineHours, region]);
+
+  // Auto-run dry-run when inputs change
+  useEffect(() => {
+    if (!dockerImage || !command || duration <= 0) return;
+
+    const timer = setTimeout(() => {
+      handleDryRun();
+    }, 1000); // Debounce 1 second
+
+    return () => clearTimeout(timer);
+  }, [dockerImage, command, duration, deadlineHours, region, handleDryRun]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    
+    if (!dockerImage || !command) {
+      setErrorMessage("Please fill in all required fields");
+      setShowError(true);
+      setTimeout(() => setShowError(false), 3000);
+      return;
+    }
+
     setIsSubmitting(true);
 
-    // Simulate API call
-    setTimeout(() => {
-      if (formData.simulationMode) {
-        // Mock simulation result
-        const now = new Date("2025-12-04T14:45:00");
-        const optimalTime = new Date(now);
-        optimalTime.setHours(optimalTime.getHours() + 2);
+    const deadline = new Date();
+    deadline.setHours(deadline.getHours() + deadlineHours);
 
-        setSimulationResult({
-          immediateExecution: {
-            startTime: now.toISOString(),
-            carbonIntensity: 450,
-            estimatedCO2: 125,
-          },
-          optimizedExecution: {
-            startTime: optimalTime.toISOString(),
-            carbonIntensity: 280,
-            estimatedCO2: 78,
-            delaySavings: 38,
-          },
-        });
-      } else {
-        // Mock job submission
-        alert("Job submitted successfully! Check the Workloads tab.");
-        setFormData({
-          dockerImage: "",
-          command: "",
-          estimatedDuration: 30,
-          slaDeadline: 4,
-          simulationMode: true,
-        });
-      }
+    const request: SubmitJobRequest = {
+      user_id: "playground-user",
+      docker_image: dockerImage,
+      command: [command],
+      deadline: deadline.toISOString(),
+      estimated_duration: duration * 60,
+      region: region,
+    };
+
+    try {
+      const result = await apiClient.submitJob(request, false); // actual submission
+      setPrediction(result);
+      setShowSuccess(true);
+      
+      // Auto-redirect to Workloads after 2 seconds
+      setTimeout(() => {
+        router.push("/?tab=workloads");
+      }, 2000);
+    } catch (error: unknown) {
+      console.error("Job submission failed:", error);
+      const message = error instanceof Error && 'response' in error 
+        ? (error as { response?: { data?: { message?: string } } }).response?.data?.message 
+        : error instanceof Error 
+        ? error.message 
+        : "Failed to submit job";
+      setErrorMessage(message || "Failed to submit job");
+      setShowError(true);
+      setTimeout(() => setShowError(false), 5000);
+    } finally {
       setIsSubmitting(false);
-    }, 1500);
+    }
   };
 
-  const presetJobs = [
-    {
-      name: "Python Data Processing",
-      image: "python:3.11-slim",
-      command: "python process_data.py",
-      duration: 45,
-    },
-    {
-      name: "Node.js Build",
-      image: "node:18-alpine",
-      command: "npm run build",
-      duration: 20,
-    },
-    {
-      name: "Docker Image Build",
-      image: "docker:24-dind",
-      command: "docker build -t myapp:latest .",
-      duration: 60,
-    },
-  ];
-
-  const loadPreset = (preset: (typeof presetJobs)[0]) => {
-    setFormData((prev) => ({
-      ...prev,
-      dockerImage: preset.image,
-      command: preset.command,
-      estimatedDuration: preset.duration,
-    }));
+  const formatTime = (date: Date) => {
+    return date.toLocaleString('en-US', {
+      month: 'short',
+      day: 'numeric',
+      hour: '2-digit',
+      minute: '2-digit',
+    });
   };
 
   return (
-    <motion.div 
+    <motion.div
       initial={{ opacity: 0 }}
       animate={{ opacity: 1 }}
       transition={{ duration: 0.5 }}
-      className="space-y-6"
+      className="space-y-6 max-w-4xl mx-auto"
     >
       {/* Header */}
-      <div>
-        <h2 className="text-2xl font-bold text-karbos-light-blue">
-          Playground
-        </h2>
-        <p className="text-karbos-lavender mt-1">
-          Test job submissions and see optimization in action
+      <div className="text-center">
+        <h2 className="text-3xl font-bold text-karbos-light-blue">Job Playground</h2>
+        <p className="text-sm text-gray-400 mt-2">
+          Submit carbon-aware jobs and see real-time CO₂ savings predictions
         </p>
       </div>
 
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-        {/* Job Submission Form */}
-        <div className="bg-karbos-indigo p-6 rounded-lg border border-karbos-blue-purple">
-          <h3 className="text-xl font-semibold text-karbos-light-blue mb-4">
-            Submit Job
-          </h3>
-
-          <form onSubmit={handleSubmit} className="space-y-4">
-            {/* Docker Image */}
+      {/* Success Toast */}
+      <AnimatePresence>
+        {showSuccess && (
+          <motion.div
+            initial={{ opacity: 0, y: -20 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: -20 }}
+            className="bg-green-500/10 border border-green-500/20 rounded-lg p-4 flex items-start gap-3"
+          >
+            <CheckCircle className="w-5 h-5 text-green-400 flex-shrink-0 mt-0.5" />
             <div>
-              <label className="block text-sm font-medium text-karbos-lavender mb-2">
-                Docker Image
+              <p className="text-green-400 font-semibold">Job Scheduled Successfully!</p>
+              <p className="text-sm text-gray-300 mt-1">
+                Redirecting to Workloads tab...
+              </p>
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      {/* Error Toast */}
+      <AnimatePresence>
+        {showError && (
+          <motion.div
+            initial={{ opacity: 0, y: -20 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: -20 }}
+            className="bg-red-500/10 border border-red-500/20 rounded-lg p-4 flex items-start gap-3"
+          >
+            <AlertCircle className="w-5 h-5 text-red-400 flex-shrink-0 mt-0.5" />
+            <div>
+              <p className="text-red-400 font-semibold">Submission Failed</p>
+              <p className="text-sm text-gray-300 mt-1">{errorMessage}</p>
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+        {/* Left Column - Form */}
+        <motion.div
+          initial={{ opacity: 0, x: -20 }}
+          animate={{ opacity: 1, x: 0 }}
+          transition={{ delay: 0.1 }}
+        >
+          <form onSubmit={handleSubmit} className="bg-karbos-dark-gray border border-karbos-blue-purple/20 rounded-lg p-6 space-y-6">
+            <div className="flex items-center gap-2 mb-4">
+              <Settings className="w-5 h-5 text-karbos-blue-purple" />
+              <h3 className="text-lg font-semibold text-white">Job Configuration</h3>
+            </div>
+
+            {/* Docker Image Selector */}
+            <div>
+              <label className="block text-sm font-medium text-gray-300 mb-2">
+                Docker Image *
+              </label>
+              <select
+                value={dockerImage}
+                onChange={(e) => setDockerImage(e.target.value)}
+                className="w-full px-4 py-3 bg-karbos-dark-gray border border-karbos-blue-purple/20 rounded-md text-black focus:outline-none focus:border-karbos-blue-purple transition-colors"
+                required
+              >
+                {DOCKER_IMAGES.map(img => (
+                  <option key={img.value} value={img.value}>
+                    {img.label} - {img.description}
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            {/* Command Input */}
+            <div>
+              <label className="block text-sm font-medium text-gray-300 mb-2">
+                Command *
               </label>
               <input
                 type="text"
-                name="dockerImage"
-                value={formData.dockerImage}
-                onChange={handleInputChange}
-                placeholder="e.g., python:3.11-slim"
+                value={command}
+                onChange={(e) => setCommand(e.target.value)}
+                placeholder='e.g., python script.py'
+                className="w-full px-4 py-3 bg-karbos-dark-gray border border-karbos-blue-purple/20 rounded-md text-black focus:outline-none focus:border-karbos-blue-purple transition-colors"
                 required
-                className="w-full px-4 py-2 bg-karbos-navy border border-karbos-blue-purple rounded-md text-karbos-light-blue placeholder-karbos-lavender/50 focus:outline-none focus:ring-2 focus:ring-karbos-lavender"
               />
+              <p className="text-xs text-gray-500 mt-1">Shell command to execute in the container</p>
             </div>
 
-            {/* Command */}
+            {/* Duration Input */}
             <div>
-              <label className="block text-sm font-medium text-karbos-lavender mb-2">
-                Command
-              </label>
-              <textarea
-                name="command"
-                value={formData.command}
-                onChange={handleInputChange}
-                placeholder="e.g., python script.py --arg value"
-                required
-                rows={3}
-                className="w-full px-4 py-2 bg-karbos-navy border border-karbos-blue-purple rounded-md text-karbos-light-blue placeholder-karbos-lavender/50 focus:outline-none focus:ring-2 focus:ring-karbos-lavender"
-              />
-            </div>
-
-            {/* Estimated Duration */}
-            <div>
-              <label className="block text-sm font-medium text-karbos-lavender mb-2">
-                Estimated Duration (minutes)
+              <label className="block text-sm font-medium text-gray-300 mb-2">
+                Estimated Duration: {duration} minutes
               </label>
               <input
-                type="number"
-                name="estimatedDuration"
-                value={formData.estimatedDuration}
-                onChange={handleInputChange}
-                min="1"
+                type="range"
+                min="5"
                 max="180"
-                required
-                className="w-full px-4 py-2 bg-karbos-navy border border-karbos-blue-purple rounded-md text-karbos-light-blue focus:outline-none focus:ring-2 focus:ring-karbos-lavender"
+                step="5"
+                value={duration}
+                onChange={(e) => setDuration(parseInt(e.target.value))}
+                className="w-full h-2 bg-gray-700 rounded-lg appearance-none cursor-pointer accent-karbos-blue-purple"
               />
+              <div className="flex justify-between text-xs text-gray-500 mt-1">
+                <span>5 min</span>
+                <span>180 min (3 hrs)</span>
+              </div>
+            </div>
+
+            {/* Region Selector */}
+            <div>
+              <label className="block text-sm font-medium text-gray-300 mb-2">
+                Region
+              </label>
+              <select
+                value={region}
+                onChange={(e) => setRegion(e.target.value)}
+                className="w-full px-4 py-3 bg-karbos-dark-gray border border-karbos-blue-purple/20 rounded-md text-black focus:outline-none focus:border-karbos-blue-purple transition-colors"
+              >
+                {REGIONS.map(r => (
+                  <option key={r.value} value={r.value}>
+                    {r.label}
+                  </option>
+                ))}
+              </select>
             </div>
 
             {/* SLA Deadline Slider */}
             <div>
-              <label className="block text-sm font-medium text-karbos-lavender mb-2">
-                SLA Deadline: Must finish within {formData.slaDeadline} hours
+              <label className="block text-sm font-medium text-gray-300 mb-2">
+                <Clock className="w-4 h-4 inline mr-2" />
+                Deadline: I need this done by {formatTime(new Date(Date.now() + deadlineHours * 60 * 60 * 1000))}
               </label>
               <input
                 type="range"
-                name="slaDeadline"
-                value={formData.slaDeadline}
-                onChange={handleSliderChange}
                 min="1"
                 max="24"
-                className="w-full h-2 bg-karbos-navy rounded-lg appearance-none cursor-pointer accent-karbos-blue-purple"
+                step="1"
+                value={deadlineHours}
+                onChange={(e) => setDeadlineHours(parseInt(e.target.value))}
+                className="w-full h-2 bg-gray-700 rounded-lg appearance-none cursor-pointer accent-karbos-blue-purple"
               />
-              <div className="flex justify-between text-xs text-karbos-lavender mt-1">
-                <span>1h</span>
-                <span>6h</span>
-                <span>12h</span>
-                <span>18h</span>
-                <span>24h</span>
+              <div className="flex justify-between text-xs text-gray-500 mt-1">
+                <span>1 Hour</span>
+                <span>24 Hours</span>
               </div>
-            </div>
-
-            {/* Simulation Mode Toggle */}
-            <div className="flex items-center justify-between p-4 bg-karbos-navy rounded-md">
-              <div>
-                <p className="text-karbos-light-blue font-medium">
-                  Simulation Mode
-                </p>
-                <p className="text-xs text-karbos-lavender mt-1">
-                  {formData.simulationMode
-                    ? "Calculate optimal time without execution"
-                    : "Actually submit and execute the job"}
-                </p>
-              </div>
-              <button
-                type="button"
-                onClick={handleToggle}
-                className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${
-                  formData.simulationMode
-                    ? "bg-karbos-blue-purple"
-                    : "bg-karbos-lavender/30"
-                }`}
-              >
-                <span
-                  className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${
-                    formData.simulationMode ? "translate-x-6" : "translate-x-1"
-                  }`}
-                />
-              </button>
             </div>
 
             {/* Submit Button */}
             <button
               type="submit"
               disabled={isSubmitting}
-              className="w-full px-4 py-3 bg-karbos-blue-purple text-white rounded-md font-semibold hover:bg-opacity-80 disabled:opacity-50 disabled:cursor-not-allowed transition-all"
+              className="w-full px-6 py-3 bg-karbos-blue-purple text-white rounded-md hover:bg-opacity-80 transition-colors flex items-center justify-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed font-semibold"
             >
-              {isSubmitting
-                ? "Processing..."
-                : formData.simulationMode
-                  ? "Run Simulation"
-                  : "Submit Job"}
+              {isSubmitting ? (
+                <>
+                  <Loader className="w-5 h-5 animate-spin" />
+                  Submitting...
+                </>
+              ) : (
+                <>
+                  <Play className="w-5 h-5" />
+                  Submit Job
+                </>
+              )}
             </button>
           </form>
+        </motion.div>
 
-          {/* Preset Jobs */}
-          <div className="mt-6">
-            <h4 className="text-sm font-medium text-karbos-lavender mb-3">
-              Quick Presets
-            </h4>
-            <div className="space-y-2">
-              {presetJobs.map((preset, index) => (
-                <button
-                  key={index}
-                  onClick={() => loadPreset(preset)}
-                  className="w-full text-left px-4 py-2 bg-karbos-navy rounded-md hover:bg-karbos-blue-purple/20 transition-colors"
-                >
-                  <p className="text-karbos-light-blue text-sm font-medium">
-                    {preset.name}
-                  </p>
-                  <p className="text-karbos-lavender text-xs mt-1">
-                    {preset.image} • {preset.duration}min
-                  </p>
-                </button>
-              ))}
-            </div>
-          </div>
-        </div>
-
-        {/* Simulation Results */}
-        <div className="bg-karbos-indigo p-6 rounded-lg border border-karbos-blue-purple">
-          <h3 className="text-xl font-semibold text-karbos-light-blue mb-4">
-            Optimization Analysis
-          </h3>
-
-          {simulationResult ? (
-            <div className="space-y-6">
-              {/* Immediate Execution */}
-              <div className="bg-karbos-navy p-4 rounded-lg border border-red-500/30">
-                <div className="flex items-center justify-between mb-3">
-                  <h4 className="text-red-400 font-semibold">
-                    Immediate Execution
-                  </h4>
-                  <span className="text-xs text-karbos-lavender">
-                    (No optimization)
-                  </span>
-                </div>
-                <div className="space-y-2">
-                  <div className="flex justify-between text-sm">
-                    <span className="text-karbos-lavender">Start Time:</span>
-                    <span className="text-karbos-light-blue">
-                      {new Date(
-                        simulationResult.immediateExecution.startTime,
-                      ).toLocaleString()}
-                    </span>
-                  </div>
-                  <div className="flex justify-between text-sm">
-                    <span className="text-karbos-lavender">
-                      Carbon Intensity:
-                    </span>
-                    <span className="text-red-400 font-semibold">
-                      {simulationResult.immediateExecution.carbonIntensity}{" "}
-                      gCO₂/kWh
-                    </span>
-                  </div>
-                  <div className="flex justify-between text-sm">
-                    <span className="text-karbos-lavender">Estimated CO₂:</span>
-                    <span className="text-karbos-light-blue font-semibold">
-                      {simulationResult.immediateExecution.estimatedCO2}g
-                    </span>
-                  </div>
-                </div>
+        {/* Right Column - Impact Prediction */}
+        <motion.div
+          initial={{ opacity: 0, x: 20 }}
+          animate={{ opacity: 1, x: 0 }}
+          transition={{ delay: 0.2 }}
+          className="space-y-4"
+        >
+          {/* Impact Predictor */}
+          {impactPrediction && (
+            <div className="bg-karbos-dark-gray border border-karbos-blue-purple/20 rounded-lg p-6">
+              <div className="flex items-center gap-2 mb-4">
+                <Leaf className="w-5 h-5 text-green-400" />
+                <h3 className="text-lg font-semibold text-white">Impact Prediction</h3>
               </div>
 
-              {/* Optimized Execution */}
-              <div className="bg-karbos-navy p-4 rounded-lg border border-green-500/30">
-                <div className="flex items-center justify-between mb-3">
-                  <h4 className="text-green-400 font-semibold">
-                    Optimized Execution
-                  </h4>
-                  <span className="text-xs text-green-400 bg-green-500/20 px-2 py-1 rounded">
-                    Recommended
-                  </span>
-                </div>
-                <div className="space-y-2">
-                  <div className="flex justify-between text-sm">
-                    <span className="text-karbos-lavender">Start Time:</span>
-                    <span className="text-karbos-light-blue">
-                      {new Date(
-                        simulationResult.optimizedExecution.startTime,
-                      ).toLocaleString()}
-                    </span>
+              <div className="space-y-4">
+                {/* Savings Badge */}
+                {impactPrediction.savingsPercent > 5 ? (
+                  <div className="bg-green-500/10 border border-green-500/20 rounded-lg p-4">
+                    <div className="flex items-start gap-3">
+                      <TrendingDown className="w-6 h-6 text-green-400 flex-shrink-0" />
+                      <div>
+                        <p className="text-2xl font-bold text-green-400">
+                          ~{Math.round(impactPrediction.savingsPercent)}% CO₂ Savings
+                        </p>
+                        <p className="text-sm text-gray-300 mt-1">
+                          By delaying until {formatTime(impactPrediction.optimalTime)}
+                        </p>
+                      </div>
+                    </div>
                   </div>
-                  <div className="flex justify-between text-sm">
-                    <span className="text-karbos-lavender">
-                      Carbon Intensity:
-                    </span>
-                    <span className="text-green-400 font-semibold">
-                      {simulationResult.optimizedExecution.carbonIntensity}{" "}
-                      gCO₂/kWh
-                    </span>
+                ) : (
+                  <div className="bg-blue-500/10 border border-blue-500/20 rounded-lg p-4">
+                    <div className="flex items-start gap-3">
+                      <Zap className="w-6 h-6 text-blue-400 flex-shrink-0" />
+                      <div>
+                        <p className="text-lg font-bold text-blue-400">
+                          Run Immediately
+                        </p>
+                        <p className="text-sm text-gray-300 mt-1">
+                          Current grid is already optimal
+                        </p>
+                      </div>
+                    </div>
                   </div>
-                  <div className="flex justify-between text-sm">
-                    <span className="text-karbos-lavender">Estimated CO₂:</span>
-                    <span className="text-karbos-light-blue font-semibold">
-                      {simulationResult.optimizedExecution.estimatedCO2}g
-                    </span>
-                  </div>
-                </div>
-              </div>
+                )}
 
-              {/* Savings Summary */}
-              <div className="bg-gradient-to-r from-green-500/20 to-cyan-500/20 p-6 rounded-lg border border-green-500/50">
-                <div className="text-center">
-                  <p className="text-karbos-lavender text-sm mb-2">
-                    Carbon Savings
-                  </p>
-                  <p className="text-4xl font-bold text-green-400 mb-1">
-                    {simulationResult.optimizedExecution.delaySavings}%
-                  </p>
-                  <p className="text-karbos-lavender text-sm">
-                    {simulationResult.immediateExecution.estimatedCO2 -
-                      simulationResult.optimizedExecution.estimatedCO2}
-                    g CO₂ saved
-                  </p>
-                  <div className="mt-4 pt-4 border-t border-karbos-lavender/20">
-                    <p className="text-xs text-karbos-lavender">
-                      By delaying execution by{" "}
-                      {Math.round(
-                        (new Date(
-                          simulationResult.optimizedExecution.startTime,
-                        ).getTime() -
-                          new Date(
-                            simulationResult.immediateExecution.startTime,
-                          ).getTime()) /
-                          3600000,
-                      )}{" "}
-                      hours, we can reduce carbon emissions significantly while
-                      staying within SLA.
+                {/* Details Grid */}
+                <div className="grid grid-cols-2 gap-4">
+                  <div className="bg-karbos-dark-gray/50 rounded-lg p-3">
+                    <p className="text-xs text-gray-400 mb-1">Current Intensity</p>
+                    <p className="text-xl font-bold text-orange-400">
+                      {Math.round(impactPrediction.currentIntensity)}
                     </p>
+                    <p className="text-xs text-gray-500">gCO₂/kWh</p>
                   </div>
-                </div>
-              </div>
 
-              {/* Visualization */}
-              <div className="bg-karbos-navy p-4 rounded-lg">
-                <h5 className="text-karbos-lavender text-sm mb-3">
-                  Intensity Comparison
-                </h5>
-                <div className="space-y-3">
-                  <div>
-                    <div className="flex justify-between text-xs text-karbos-lavender mb-1">
-                      <span>Immediate</span>
-                      <span>
-                        {simulationResult.immediateExecution.carbonIntensity}{" "}
-                        gCO₂/kWh
-                      </span>
-                    </div>
-                    <div className="w-full bg-karbos-indigo rounded-full h-3">
-                      <div
-                        className="h-3 bg-red-500 rounded-full"
-                        style={{
-                          width: `${(simulationResult.immediateExecution.carbonIntensity / 500) * 100}%`,
-                        }}
-                      />
-                    </div>
+                  <div className="bg-karbos-dark-gray/50 rounded-lg p-3">
+                    <p className="text-xs text-gray-400 mb-1">Optimal Intensity</p>
+                    <p className="text-xl font-bold text-green-400">
+                      {Math.round(impactPrediction.optimalIntensity)}
+                    </p>
+                    <p className="text-xs text-gray-500">gCO₂/kWh</p>
                   </div>
-                  <div>
-                    <div className="flex justify-between text-xs text-karbos-lavender mb-1">
-                      <span>Optimized</span>
-                      <span>
-                        {simulationResult.optimizedExecution.carbonIntensity}{" "}
-                        gCO₂/kWh
-                      </span>
-                    </div>
-                    <div className="w-full bg-karbos-indigo rounded-full h-3">
-                      <div
-                        className="h-3 bg-green-500 rounded-full"
-                        style={{
-                          width: `${(simulationResult.optimizedExecution.carbonIntensity / 500) * 100}%`,
-                        }}
-                      />
-                    </div>
+
+                  <div className="bg-karbos-dark-gray/50 rounded-lg p-3">
+                    <p className="text-xs text-gray-400 mb-1">Estimated Savings</p>
+                    <p className="text-xl font-bold text-purple-400">
+                      {Math.round(impactPrediction.co2Savings)}g
+                    </p>
+                    <p className="text-xs text-gray-500">CO₂ equivalent</p>
+                  </div>
+
+                  <div className="bg-karbos-dark-gray/50 rounded-lg p-3">
+                    <p className="text-xs text-gray-400 mb-1">Optimal Start</p>
+                    <p className="text-sm font-bold text-white">
+                      {impactPrediction.optimalTime.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' })}
+                    </p>
+                    <p className="text-xs text-gray-500">{impactPrediction.optimalTime.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}</p>
                   </div>
                 </div>
               </div>
-            </div>
-          ) : (
-            <div className="flex flex-col items-center justify-center h-96 text-center">
-              <svg
-                className="w-24 h-24 text-karbos-lavender/30 mb-4"
-                fill="none"
-                stroke="currentColor"
-                viewBox="0 0 24 24"
-              >
-                <path
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                  strokeWidth={2}
-                  d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z"
-                />
-              </svg>
-              <h4 className="text-karbos-lavender text-lg font-medium mb-2">
-                No Simulation Yet
-              </h4>
-              <p className="text-karbos-lavender/70 text-sm max-w-sm">
-                Fill out the form and run a simulation to see how much carbon
-                can be saved by optimizing job execution timing.
-              </p>
             </div>
           )}
-        </div>
-      </div>
 
-      {/* Info Box */}
-      <div className="bg-karbos-indigo p-4 rounded-lg border border-karbos-blue-purple">
-        <div className="flex items-start space-x-3">
-          <svg
-            className="w-5 h-5 text-karbos-blue-purple mt-0.5"
-            fill="currentColor"
-            viewBox="0 0 20 20"
-          >
-            <path
-              fillRule="evenodd"
-              d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7-4a1 1 0 11-2 0 1 1 0 012 0zM9 9a1 1 0 000 2v3a1 1 0 001 1h1a1 1 0 100-2v-3a1 1 0 00-1-1H9z"
-              clipRule="evenodd"
-            />
-          </svg>
-          <div>
-            <p className="text-sm text-karbos-lavender">
-              <span className="font-semibold text-karbos-light-blue">Tip:</span>{" "}
-              Use simulation mode to test the optimization algorithm without
-              actually executing jobs. This is perfect for demonstrations and
-              understanding how carbon-aware scheduling works.
+          {/* Server Prediction (from dry-run) */}
+          {prediction && (
+            <div className="bg-karbos-dark-gray border border-karbos-blue-purple/20 rounded-lg p-6">
+              <div className="flex items-center gap-2 mb-4">
+                <CheckCircle className="w-5 h-5 text-karbos-blue-purple" />
+                <h3 className="text-lg font-semibold text-white">Server Calculation</h3>
+              </div>
+
+              <div className="space-y-3 text-sm">
+                <div className="flex justify-between items-center pb-2 border-b border-gray-700">
+                  <span className="text-gray-400">Execution Mode:</span>
+                  <span className={`font-semibold ${prediction.immediate ? 'text-yellow-400' : 'text-green-400'}`}>
+                    {prediction.immediate ? 'Immediate' : 'Delayed (Optimized)'}
+                  </span>
+                </div>
+
+                <div className="flex justify-between items-center pb-2 border-b border-gray-700">
+                  <span className="text-gray-400">Scheduled Time:</span>
+                  <span className="font-semibold text-white">
+                    {new Date(prediction.scheduled_time).toLocaleTimeString()}
+                  </span>
+                </div>
+
+                {prediction.expected_intensity && (
+                  <div className="flex justify-between items-center pb-2 border-b border-gray-700">
+                    <span className="text-gray-400">Expected Intensity:</span>
+                    <span className="font-semibold text-purple-400">
+                      {Math.round(prediction.expected_intensity)} gCO₂/kWh
+                    </span>
+                  </div>
+                )}
+
+                {prediction.carbon_savings && prediction.carbon_savings > 0 && (
+                  <div className="flex justify-between items-center">
+                    <span className="text-gray-400">Carbon Savings:</span>
+                    <span className="font-semibold text-green-400">
+                      {Math.round(prediction.carbon_savings)} gCO₂
+                    </span>
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
+
+          {/* Info Box */}
+          <div className="bg-blue-500/10 border border-blue-500/20 rounded-lg p-4">
+            <p className="text-sm text-gray-300">
+              <strong className="text-blue-400">How it works:</strong> The scheduler analyzes the carbon intensity forecast for your region and deadline. Jobs are automatically delayed to cleaner energy windows when possible, reducing your carbon footprint without compromising SLAs.
             </p>
           </div>
-        </div>
+        </motion.div>
       </div>
     </motion.div>
   );
