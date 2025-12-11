@@ -14,6 +14,7 @@ import (
 	"github.com/Sambit-Mondal/karbos/server/internal/docker"
 	"github.com/Sambit-Mondal/karbos/server/internal/queue"
 	"github.com/Sambit-Mondal/karbos/server/internal/worker"
+	"github.com/google/uuid"
 )
 
 func main() {
@@ -103,6 +104,38 @@ func main() {
 	if err := workerPool.Start(); err != nil {
 		log.Fatalf("Failed to start worker pool: %v", err)
 	}
+
+	// Generate unique worker ID
+	workerID := uuid.New().String()
+	log.Printf("Worker ID: %s", workerID)
+
+	// Start heartbeat goroutine
+	heartbeatCtx, heartbeatCancel := context.WithCancel(context.Background())
+	defer heartbeatCancel()
+
+	go func() {
+		ticker := time.NewTicker(10 * time.Second)
+		defer ticker.Stop()
+
+		// Send initial heartbeat
+		if err := redisQueue.SetWorkerHeartbeat(heartbeatCtx, workerID, 15); err != nil {
+			log.Printf("Failed to send initial heartbeat: %v", err)
+		}
+
+		for {
+			select {
+			case <-ticker.C:
+				if err := redisQueue.SetWorkerHeartbeat(heartbeatCtx, workerID, 15); err != nil {
+					log.Printf("Failed to send heartbeat: %v", err)
+				} else {
+					log.Printf("💓 Heartbeat sent (worker:%s)", workerID)
+				}
+			case <-heartbeatCtx.Done():
+				log.Println("Heartbeat stopped")
+				return
+			}
+		}
+	}()
 
 	// Setup graceful shutdown
 	sigChan := make(chan os.Signal, 1)

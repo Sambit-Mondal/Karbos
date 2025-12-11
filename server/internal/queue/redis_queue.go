@@ -288,3 +288,30 @@ func (q *RedisQueue) GetQueueLength(ctx context.Context) (int64, error) {
 func (q *RedisQueue) GetDelayedJobsCount(ctx context.Context) (int64, error) {
 	return q.GetDelayedQueueLength(ctx)
 }
+
+// SetWorkerHeartbeat sets a worker heartbeat key with expiration
+func (q *RedisQueue) SetWorkerHeartbeat(ctx context.Context, workerID string, ttlSeconds int) error {
+	key := fmt.Sprintf("worker:%s", workerID)
+	return q.client.Set(ctx, key, "alive", time.Duration(ttlSeconds)*time.Second).Err()
+}
+
+// GetActiveWorkers scans for active worker keys and returns their IDs
+func (q *RedisQueue) GetActiveWorkers(ctx context.Context) ([]string, error) {
+	var workers []string
+
+	iter := q.client.Scan(ctx, 0, "worker:*", 0).Iterator()
+	for iter.Next(ctx) {
+		key := iter.Val()
+		// Extract worker ID from "worker:{uuid}" format
+		if len(key) > 7 {
+			workerID := key[7:] // Remove "worker:" prefix
+			workers = append(workers, workerID)
+		}
+	}
+
+	if err := iter.Err(); err != nil {
+		return nil, fmt.Errorf("failed to scan worker keys: %w", err)
+	}
+
+	return workers, nil
+}
