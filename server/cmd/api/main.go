@@ -120,9 +120,11 @@ func main() {
 		log.Printf("✓ Prometheus metrics enabled on port %s", cfg.Metrics.Port)
 	}
 
-	// Initialize handlers
+	// Initialize HTTP handlers
 	jobHandler := handlers.NewJobHandler(jobRepo, redisQueue, carbonScheduler)
+	carbonHandler := handlers.NewCarbonHandler(carbonCacheRepo)
 	healthHandler := handlers.NewHealthHandler(db, redisQueue)
+	sysHandler := handlers.NewSystemHandler(redisQueue)
 
 	// Create Fiber app
 	app := fiber.New(fiber.Config{
@@ -156,7 +158,7 @@ func main() {
 	}
 
 	// Routes
-	setupRoutes(app, jobHandler, healthHandler, metricsCollector, cfg)
+	setupRoutes(app, jobHandler, carbonHandler, healthHandler, sysHandler, metricsCollector, cfg)
 
 	// Graceful shutdown
 	go func() {
@@ -183,13 +185,15 @@ func main() {
 	log.Println("✓ Phase 5: Reliability & Monitoring Complete!")
 	log.Println("✓ All 5 Phases Operational - Production-Ready Carbon-Aware Job Scheduling System!")
 	log.Println("\n📋 Available Endpoints:")
-	log.Println("  POST   /api/submit          - Submit a new job (with carbon-aware scheduling)")
-	log.Println("  GET    /api/jobs/:id        - Get job details")
-	log.Println("  GET    /api/users/:id/jobs  - Get user's jobs")
-	log.Println("  GET    /health              - Health check")
-	log.Println("  GET    /ready               - Readiness check")
+	log.Println("  POST   /api/submit             - Submit a new job (with carbon-aware scheduling)")
+	log.Println("  GET    /api/jobs/:id           - Get job details")
+	log.Println("  GET    /api/users/:id/jobs     - Get user's jobs")
+	log.Println("  GET    /api/carbon-forecast    - Get carbon intensity forecast data")
+	log.Println("  GET    /api/carbon-cache       - Get all carbon cache entries")
+	log.Println("  GET    /health                 - Health check")
+	log.Println("  GET    /ready                  - Readiness check")
 	if cfg.Metrics.Enabled {
-		log.Printf("  GET    /metrics             - Prometheus metrics (port %s)\n", cfg.Metrics.Port)
+		log.Printf("  GET    /metrics                - Prometheus metrics (port %s)\n", cfg.Metrics.Port)
 	}
 
 	if err := app.Listen(addr); err != nil {
@@ -229,7 +233,7 @@ func wrapWithCircuitBreaker(service carbon.CarbonService, cfg *config.Config) ca
 }
 
 // setupRoutes configures all API routes
-func setupRoutes(app *fiber.App, jobHandler *handlers.JobHandler, healthHandler *handlers.HealthHandler, metricsCollector *metrics.MetricsCollector, cfg *config.Config) {
+func setupRoutes(app *fiber.App, jobHandler *handlers.JobHandler, carbonHandler *handlers.CarbonHandler, healthHandler *handlers.HealthHandler, sysHandler *handlers.SystemHandler, metricsCollector *metrics.MetricsCollector, cfg *config.Config) {
 	// Health checks
 	app.Get("/health", healthHandler.HealthCheck)
 	app.Get("/ready", healthHandler.ReadyCheck)
@@ -254,8 +258,16 @@ func setupRoutes(app *fiber.App, jobHandler *handlers.JobHandler, healthHandler 
 
 	// Job routes
 	api.Post("/submit", jobHandler.SubmitJob)
+	api.Get("/jobs", jobHandler.GetAllJobs) // Get all jobs
 	api.Get("/jobs/:id", jobHandler.GetJob)
 	api.Get("/users/:userId/jobs", jobHandler.GetUserJobs)
+
+	// Carbon routes
+	api.Get("/carbon-forecast", carbonHandler.GetCarbonForecast)
+	api.Get("/carbon-cache", carbonHandler.GetCarbonCache)
+
+	// System routes
+	api.Get("/system/health", sysHandler.GetSystemHealth)
 
 	// Root endpoint
 	app.Get("/", func(c *fiber.Ctx) error {

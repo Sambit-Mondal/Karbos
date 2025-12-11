@@ -88,6 +88,16 @@ type ErrorResponse struct {
 	Code    int    `json:"code"`
 }
 
+// SystemHealthResponse represents the system health status
+type SystemHealthResponse struct {
+	ActiveWorkers       int       `json:"active_workers"`
+	WorkerIDs           []string  `json:"worker_ids"`
+	QueueDepthImmediate int       `json:"queue_depth_immediate"`
+	QueueDepthDelayed   int       `json:"queue_depth_delayed"`
+	RedisLatencyMs      int       `json:"redis_latency_ms"`
+	Timestamp           time.Time `json:"timestamp"`
+}
+
 // ValidateStatus checks if the status is valid
 func (s JobStatus) IsValid() bool {
 	switch s {
