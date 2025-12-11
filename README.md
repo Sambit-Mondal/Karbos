@@ -402,9 +402,6 @@ go test ./...              # Run tests
 go build cmd/api/main.go   # Build binary
 ```
 
-### API Testing
-- Import `server/postman_collection.json` into Postman
-- Or use cURL commands from documentation
 
 ## 📊 Database Schema
 
