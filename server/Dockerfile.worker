@@ -1,0 +1,47 @@
+# Multi-stage Dockerfile for Karbos Worker Node
+# Stage 1: Build the Go binary
+FROM golang:1.23-alpine AS builder
+
+# Install build dependencies
+RUN apk update && apk add --no-cache git ca-certificates tzdata
+
+# Set working directory
+WORKDIR /build
+
+# Copy go mod files
+COPY go.mod go.sum ./
+
+# Download dependencies
+RUN go mod download
+
+# Copy source code
+COPY . .
+
+# Build the worker binary
+RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build \
+    -ldflags="-w -s" \
+    -o karbos-worker \
+    ./cmd/worker
+
+# Stage 2: Create runtime image with Docker support
+FROM docker:24-dind
+
+# Install runtime dependencies
+RUN apk update && apk add --no-cache ca-certificates tzdata
+
+# Create app directory
+WORKDIR /app
+
+# Copy binary from builder
+COPY --from=builder /build/karbos-worker .
+
+# Make binary executable
+RUN chmod +x karbos-worker
+
+# Health check (worker doesn't expose HTTP, check process)
+HEALTHCHECK --interval=30s --timeout=5s --start-period=15s --retries=3 \
+    CMD pgrep karbos-worker || exit 1
+
+# Run as root to access Docker socket
+# In production, consider using Docker socket proxy for security
+CMD ["./karbos-worker"]

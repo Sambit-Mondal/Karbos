@@ -1,0 +1,183 @@
+services:
+  # PostgreSQL Database
+  postgres:
+    image: postgres:16-alpine
+    container_name: karbos-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: karbos
+      POSTGRES_USER: karbos
+      POSTGRES_PASSWORD: karbos_secure_password
+      PGDATA: /var/lib/postgresql/data/pgdata
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./server/database/init.sql:/docker-entrypoint-initdb.d/01-init.sql:ro
+    ports:
+      - "5432:5432"
+    networks:
+      - karbos-network
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U karbos -d karbos"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+
+  # Redis Broker
+  redis:
+    image: redis:7-alpine
+    container_name: karbos-redis
+    restart: unless-stopped
+    command: redis-server --appendonly yes --requirepass karbos_redis_password
+    volumes:
+      - redis_data:/data
+    ports:
+      - "6379:6379"
+    networks:
+      - karbos-network
+    healthcheck:
+      test: ["CMD", "redis-cli", "--raw", "incr", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 5s
+
+  # Karbos API Server
+  api:
+    build:
+      context: ./server
+      dockerfile: Dockerfile.api
+    container_name: karbos-api
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    environment:
+      # Server
+      SERVER_PORT: "8080"
+      SERVER_ENVIRONMENT: production
+      
+      # Database
+      DATABASE_URL: postgresql://karbos:karbos_secure_password@postgres:5432/karbos?sslmode=disable
+      
+      # Redis
+      REDIS_HOST: redis
+      REDIS_PORT: "6379"
+      REDIS_PASSWORD: karbos_redis_password
+      REDIS_DB: "0"
+      
+      # Queue
+      QUEUE_IMMEDIATE_KEY: karbos:jobs:ready
+      QUEUE_DELAYED_KEY: karbos:jobs:delayed
+      
+      # Carbon API (optional - configure with your keys)
+      CARBON_PROVIDER: electricitymaps
+      CARBON_API_KEY: ${CARBON_API_KEY:-}
+      CARBON_BASE_URL: https://api.electricitymap.org/v3
+      CARBON_CACHE_TTL: 1h
+      
+      # Circuit Breaker
+      CIRCUIT_BREAKER_MAX_FAILURES: "5"
+      CIRCUIT_BREAKER_TIMEOUT: 30s
+      CIRCUIT_BREAKER_RESET_TIMEOUT: 10s
+      CIRCUIT_BREAKER_STATIC_FALLBACK: "400.0"
+      
+      # Promoter
+      PROMOTER_CHECK_INTERVAL: 10s
+      
+      # Metrics
+      METRICS_ENABLED: "true"
+      METRICS_PORT: "9090"
+    ports:
+      - "8080:8080"
+      - "9090:9090"
+    networks:
+      - karbos-network
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://127.0.0.1:8080/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+
+  # Karbos Worker Node
+  worker:
+    build:
+      context: ./server
+      dockerfile: Dockerfile.worker
+    container_name: karbos-worker
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      api:
+        condition: service_healthy
+    environment:
+      # Database
+      DATABASE_URL: postgresql://karbos:karbos_secure_password@postgres:5432/karbos?sslmode=disable
+      
+      # Redis
+      REDIS_HOST: redis
+      REDIS_PORT: "6379"
+      REDIS_PASSWORD: karbos_redis_password
+      REDIS_DB: "0"
+      
+      # Queue
+      QUEUE_IMMEDIATE_KEY: karbos:jobs:ready
+      QUEUE_DELAYED_KEY: karbos:jobs:delayed
+      
+      # Worker
+      WORKER_POOL_SIZE: "4"
+      
+      # Docker
+      DOCKER_HOST: unix:///var/run/docker.sock
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+    networks:
+      - karbos-network
+    privileged: true
+    healthcheck:
+      test: ["CMD", "pgrep", "karbos-worker"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
+
+  # Karbos Next.js Frontend
+  web:
+    build:
+      context: ./client
+      dockerfile: Dockerfile.web
+    container_name: karbos-web
+    restart: unless-stopped
+    depends_on:
+      api:
+        condition: service_healthy
+    environment:
+      NEXT_PUBLIC_API_URL: http://localhost:8080
+      NODE_ENV: production
+    ports:
+      - "3000:3000"
+    networks:
+      - karbos-network
+    healthcheck:
+      test: ["CMD-SHELL", "node -e \"require('http').get('http://localhost:3000', (r) => {process.exit(r.statusCode === 200 ? 0 : 1)})\""]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+
+networks:
+  karbos-network:
+    driver: bridge
+    name: karbos-network
+
+volumes:
+  postgres_data:
+    name: karbos-postgres-data
+  redis_data:
+    name: karbos-redis-data
