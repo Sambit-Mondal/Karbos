@@ -2,101 +2,84 @@
 
 import React, { useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
-
-interface Job {
-    id: string;
-    image: string;
-    status: "RUNNING" | "DELAYED" | "COMPLETED" | "FAILED";
-    carbonImpact?: number;
-    slaDeadline: string;
-    submittedAt: string;
-    startTime?: string;
-    estimatedStart?: string;
-    logs?: string;
-}
+import useSWR from "swr";
+import { apiClient } from "@/lib/api";
+import type { Job } from "@/lib/types";
+import { RefreshCw, Play, Clock, CheckCircle, XCircle, Loader } from "lucide-react";
 
 const Workloads = () => {
     const [selectedJob, setSelectedJob] = useState<Job | null>(null);
-
-    // Mock data
-    const jobs: Job[] = [
+    
+    // Fetch jobs with SWR (auto-refresh every 5 seconds)
+    const { data: jobs, error, isLoading, mutate } = useSWR<Job[]>(
+        '/api/jobs',
+        () => apiClient.getJobs(),
         {
-            id: "abc-123-def",
-            image: "python:3.9-script",
-            status: "RUNNING",
-            slaDeadline: "2025-12-04T18:00:00",
-            submittedAt: "2025-12-04T12:30:00",
-            startTime: "2025-12-04T14:00:00",
-            logs: "Starting job execution...\nProcessing data...\n[INFO] Progress: 45%",
-        },
-        {
-            id: "def-456-ghi",
-            image: "node:18-alpine",
-            status: "DELAYED",
-            slaDeadline: "2025-12-04T20:00:00",
-            submittedAt: "2025-12-04T13:00:00",
-            estimatedStart: "2025-12-04T15:30:00",
-            logs: "Job queued for optimal execution window",
-        },
-        {
-            id: "ghi-789-jkl",
-            image: "ubuntu:22.04",
-            status: "COMPLETED",
-            carbonImpact: 34,
-            slaDeadline: "2025-12-04T16:00:00",
-            submittedAt: "2025-12-04T11:00:00",
-            startTime: "2025-12-04T13:00:00",
-            logs: "Job completed successfully\n[SUCCESS] Output saved to /results",
-        },
-        {
-            id: "jkl-012-mno",
-            image: "postgres:15",
-            status: "FAILED",
-            slaDeadline: "2025-12-04T15:00:00",
-            submittedAt: "2025-12-04T12:00:00",
-            startTime: "2025-12-04T14:30:00",
-            logs: "[ERROR] Connection timeout\n[ERROR] Job failed after 3 retries",
-        },
-        {
-            id: "mno-345-pqr",
-            image: "python:3.11-slim",
-            status: "DELAYED",
-            slaDeadline: "2025-12-05T10:00:00",
-            submittedAt: "2025-12-04T14:00:00",
-            estimatedStart: "2025-12-04T16:00:00",
-            logs: "Waiting for green window - Starts in 45m",
-        },
-    ];
-
-    const getStatusBadge = (status: Job["status"]) => {
-        const styles = {
-            RUNNING: "bg-green-500/20 text-green-400 border-green-500",
-            DELAYED: "bg-yellow-500/20 text-yellow-400 border-yellow-500",
-            COMPLETED: "bg-blue-500/20 text-blue-400 border-blue-500",
-            FAILED: "bg-red-500/20 text-red-400 border-red-500",
-        };
-
-        return (
-            <span
-                className={`px-3 py-1 rounded-full text-xs font-medium border ${styles[status]}`}
-            >
-                {status}
-            </span>
-        );
-    };
-
-    const calculateTimeRemaining = (estimatedStart: string) => {
-        const now = new Date("2025-12-04T14:45:00"); // Mock current time
-        const start = new Date(estimatedStart);
-        const diff = start.getTime() - now.getTime();
-        const minutes = Math.floor(diff / 60000);
-        const hours = Math.floor(minutes / 60);
-
-        if (hours > 0) {
-            return `Starts in ${hours}h ${minutes % 60}m`;
+            refreshInterval: 5000,
+            revalidateOnFocus: true,
         }
-        return `Starts in ${minutes}m`;
+    );
+
+    const handleRefresh = () => {
+        mutate();
     };
+
+    const getStatusIcon = (status: string) => {
+        switch (status) {
+            case 'RUNNING':
+                return <Play className="w-4 h-4" />;
+            case 'PENDING':
+            case 'DELAYED':
+                return <Clock className="w-4 h-4" />;
+            case 'COMPLETED':
+                return <CheckCircle className="w-4 h-4" />;
+            case 'FAILED':
+                return <XCircle className="w-4 h-4" />;
+            default:
+                return <Loader className="w-4 h-4" />;
+        }
+    };
+
+    const getStatusColor = (status: string) => {
+        switch (status) {
+            case 'RUNNING':
+                return 'text-blue-400 bg-blue-900/20 border-blue-500/30';
+            case 'PENDING':
+            case 'DELAYED':
+                return 'text-yellow-400 bg-yellow-900/20 border-yellow-500/30';
+            case 'COMPLETED':
+                return 'text-green-400 bg-green-900/20 border-green-500/30';
+            case 'FAILED':
+                return 'text-red-400 bg-red-900/20 border-red-500/30';
+            default:
+                return 'text-gray-400 bg-gray-900/20 border-gray-500/30';
+        }
+    };
+
+    const formatDate = (dateString?: string) => {
+        if (!dateString) return 'N/A';
+        const date = new Date(dateString);
+        return date.toLocaleString('en-US', {
+            month: 'short',
+            day: 'numeric',
+            hour: '2-digit',
+            minute: '2-digit',
+        });
+    };
+
+    if (error) {
+        return (
+            <div className="bg-red-900/20 border border-red-500/30 rounded-lg p-4">
+                <p className="text-red-400">Failed to load jobs: {error.message}</p>
+                <button
+                    onClick={handleRefresh}
+                    className="mt-2 px-4 py-2 bg-red-500 hover:bg-red-600 rounded-md text-white transition-colors"
+                >
+                    Retry
+                </button>
+            </div>
+        );
+    }
 
     return (
         <motion.div
@@ -107,249 +90,218 @@ const Workloads = () => {
         >
             {/* Header */}
             <div className="flex justify-between items-center">
-                <h2 className="text-2xl font-bold text-karbos-light-blue">Job Queue</h2>
+                <div>
+                    <h2 className="text-2xl font-bold text-karbos-light-blue">Job Queue</h2>
+                    <p className="text-sm text-gray-400 mt-1">
+                        {isLoading ? 'Loading...' : `${jobs?.length || 0} jobs total`}
+                    </p>
+                </div>
                 <div className="flex space-x-2">
-                    <button className="px-4 py-2 bg-karbos-blue-purple text-white rounded-md hover:bg-opacity-80 transition-colors">
+                    <button
+                        onClick={handleRefresh}
+                        disabled={isLoading}
+                        className="px-4 py-2 bg-karbos-blue-purple text-white rounded-md hover:bg-opacity-80 transition-colors flex items-center gap-2 disabled:opacity-50"
+                    >
+                        <RefreshCw className={`w-4 h-4 ${isLoading ? 'animate-spin' : ''}`} />
                         Refresh
                     </button>
-                    <button className="px-4 py-2 bg-karbos-indigo text-karbos-light-blue rounded-md border border-karbos-blue-purple hover:bg-karbos-blue-purple transition-colors">
-                        Filters
-                    </button>
                 </div>
             </div>
 
-            {/* Jobs Table */}
-            <div className="bg-karbos-indigo rounded-lg border border-karbos-blue-purple overflow-hidden">
-                <div className="overflow-x-auto">
-                    <table className="w-full">
-                        <thead className="bg-karbos-navy">
-                            <tr>
-                                <th className="px-6 py-3 text-left text-xs font-medium text-karbos-lavender uppercase tracking-wider">
-                                    Job ID
-                                </th>
-                                <th className="px-6 py-3 text-left text-xs font-medium text-karbos-lavender uppercase tracking-wider">
-                                    Image
-                                </th>
-                                <th className="px-6 py-3 text-left text-xs font-medium text-karbos-lavender uppercase tracking-wider">
-                                    Status
-                                </th>
-                                <th className="px-6 py-3 text-left text-xs font-medium text-karbos-lavender uppercase tracking-wider">
-                                    Carbon Impact
-                                </th>
-                                <th className="px-6 py-3 text-left text-xs font-medium text-karbos-lavender uppercase tracking-wider">
-                                    SLA Deadline
-                                </th>
-                                <th className="px-6 py-3 text-left text-xs font-medium text-karbos-lavender uppercase tracking-wider">
-                                    Actions
-                                </th>
-                            </tr>
-                        </thead>
-                        <tbody className="divide-y divide-karbos-blue-purple">
-                            {jobs.map((job, index) => (
-                                <motion.tr
-                                    key={job.id}
-                                    initial={{ opacity: 0, x: -20 }}
-                                    animate={{ opacity: 1, x: 0 }}
-                                    transition={{ duration: 0.3, delay: index * 0.05 }}
-                                    whileHover={{ backgroundColor: "rgba(41, 46, 111, 0.5)" }}
-                                    className="cursor-pointer"
-                                    onClick={() => setSelectedJob(job)}
-                                >
-                                    <td className="px-6 py-4 whitespace-nowrap">
-                                        <span className="text-sm font-mono text-karbos-light-blue">
-                                            {job.id}
-                                        </span>
-                                    </td>
-                                    <td className="px-6 py-4">
-                                        <span className="text-sm text-karbos-lavender">
-                                            {job.image}
-                                        </span>
-                                    </td>
-                                    <td className="px-6 py-4 whitespace-nowrap">
-                                        <div className="flex flex-col space-y-1">
-                                            {getStatusBadge(job.status)}
-                                            {job.status === "DELAYED" && job.estimatedStart && (
-                                                <span className="text-xs text-yellow-400">
-                                                    {calculateTimeRemaining(job.estimatedStart)}
-                                                </span>
-                                            )}
-                                        </div>
-                                    </td>
-                                    <td className="px-6 py-4 whitespace-nowrap">
-                                        {job.carbonImpact !== undefined ? (
-                                            <span className="text-sm text-green-400">
-                                                ↓ {job.carbonImpact}% reduction
-                                            </span>
-                                        ) : (
-                                            <span className="text-sm text-karbos-lavender">-</span>
-                                        )}
-                                    </td>
-                                    <td className="px-6 py-4 whitespace-nowrap">
-                                        <span className="text-sm text-karbos-lavender">
-                                            {new Date(job.slaDeadline).toLocaleString()}
-                                        </span>
-                                    </td>
-                                    <td className="px-6 py-4 whitespace-nowrap">
-                                        <button
-                                            onClick={(e) => {
-                                                e.stopPropagation();
-                                                setSelectedJob(job);
-                                            }}
-                                            className="text-karbos-blue-purple hover:text-karbos-lavender text-sm"
-                                        >
-                                            View Details
-                                        </button>
-                                    </td>
-                                </motion.tr>
-                            ))}
-                        </tbody>
-                    </table>
+            {/* Loading State */}
+            {isLoading && !jobs && (
+                <div className="flex justify-center items-center py-12">
+                    <Loader className="w-8 h-8 text-karbos-blue-purple animate-spin" />
                 </div>
-            </div>
+            )}
 
-            {/* Job Details Drawer */}
+            {/* Jobs List */}
+            {jobs && jobs.length === 0 && (
+                <div className="bg-karbos-indigo/50 border border-karbos-blue-purple/30 rounded-lg p-8 text-center">
+                    <p className="text-gray-400">No jobs found</p>
+                </div>
+            )}
+
+            {jobs && jobs.length > 0 && (
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                    {jobs.map((job) => (
+                        <motion.div
+                            key={job.id}
+                            initial={{ opacity: 0, y: 20 }}
+                            animate={{ opacity: 1, y: 0 }}
+                            whileHover={{ scale: 1.02 }}
+                            onClick={() => setSelectedJob(job)}
+                            className="bg-karbos-indigo rounded-lg p-4 border border-karbos-blue-purple/50 hover:border-karbos-blue-purple cursor-pointer transition-all"
+                        >
+                            {/* Job Header */}
+                            <div className="flex justify-between items-start mb-3">
+                                <div className="flex-1">
+                                    <p className="text-xs text-gray-500 font-mono">
+                                        {job.id.slice(0, 13)}...
+                                    </p>
+                                    <h3 className="text-sm font-semibold text-karbos-light-blue mt-1 truncate">
+                                        {job.docker_image}
+                                    </h3>
+                                </div>
+                                <div className={`flex items-center gap-1 px-2 py-1 rounded-full text-xs border ${getStatusColor(job.status)}`}>
+                                    {getStatusIcon(job.status)}
+                                    <span>{job.status}</span>
+                                </div>
+                            </div>
+
+                            {/* Job Details */}
+                            <div className="space-y-2 text-xs text-gray-400">
+                                <div className="flex justify-between">
+                                    <span>User:</span>
+                                    <span className="text-gray-300">{job.user_id}</span>
+                                </div>
+                                <div className="flex justify-between">
+                                    <span>Submitted:</span>
+                                    <span className="text-gray-300">{formatDate(job.created_at)}</span>
+                                </div>
+                                {job.started_at && (
+                                    <div className="flex justify-between">
+                                        <span>Started:</span>
+                                        <span className="text-gray-300">{formatDate(job.started_at)}</span>
+                                    </div>
+                                )}
+                                {job.completed_at && (
+                                    <div className="flex justify-between">
+                                        <span>Completed:</span>
+                                        <span className="text-gray-300">{formatDate(job.completed_at)}</span>
+                                    </div>
+                                )}
+                                <div className="flex justify-between">
+                                    <span>Deadline:</span>
+                                    <span className="text-gray-300">{formatDate(job.deadline)}</span>
+                                </div>
+                                {job.region && (
+                                    <div className="flex justify-between">
+                                        <span>Region:</span>
+                                        <span className="text-gray-300">{job.region}</span>
+                                    </div>
+                                )}
+                            </div>
+
+                            {/* Progress Indicator */}
+                            {job.status === 'RUNNING' && (
+                                <div className="mt-3 pt-3 border-t border-karbos-blue-purple/30">
+                                    <div className="flex items-center gap-2">
+                                        <div className="w-2 h-2 bg-green-400 rounded-full animate-pulse"></div>
+                                        <span className="text-xs text-green-400">Executing...</span>
+                                    </div>
+                                </div>
+                            )}
+                        </motion.div>
+                    ))}
+                </div>
+            )}
+
+            {/* Job Details Modal */}
             <AnimatePresence>
                 {selectedJob && (
-                    <>
+                    <motion.div
+                        initial={{ opacity: 0 }}
+                        animate={{ opacity: 1 }}
+                        exit={{ opacity: 0 }}
+                        onClick={() => setSelectedJob(null)}
+                        className="fixed inset-0 bg-black/60 flex items-center justify-center z-50 p-4"
+                    >
                         <motion.div
-                            initial={{ x: "100%" }}
-                            animate={{ x: 0 }}
-                            exit={{ x: "100%" }}
-                            transition={{ type: "spring", damping: 25, stiffness: 200 }}
-                            className="fixed inset-y-0 right-0 w-full md:w-1/2 lg:w-1/3 bg-karbos-navy border-l border-karbos-blue-purple shadow-xl z-50 overflow-y-auto"
+                            initial={{ scale: 0.9, opacity: 0 }}
+                            animate={{ scale: 1, opacity: 1 }}
+                            exit={{ scale: 0.9, opacity: 0 }}
+                            onClick={(e) => e.stopPropagation()}
+                            className="bg-karbos-indigo border border-karbos-blue-purple rounded-lg max-w-2xl w-full max-h-[80vh] overflow-auto"
                         >
-                            <div className="p-6">
-                                <div className="flex justify-between items-start mb-6">
+                            {/* Modal Header */}
+                            <div className="p-6 border-b border-karbos-blue-purple/30">
+                                <div className="flex justify-between items-start">
                                     <div>
                                         <h3 className="text-xl font-bold text-karbos-light-blue">
                                             Job Details
                                         </h3>
-                                        <p className="text-sm font-mono text-karbos-lavender mt-1">
+                                        <p className="text-sm text-gray-400 font-mono mt-1">
                                             {selectedJob.id}
                                         </p>
                                     </div>
                                     <button
                                         onClick={() => setSelectedJob(null)}
-                                        className="text-karbos-lavender hover:text-white"
+                                        className="text-gray-400 hover:text-white transition-colors"
                                     >
-                                        <svg
-                                            className="w-6 h-6"
-                                            fill="none"
-                                            stroke="currentColor"
-                                            viewBox="0 0 24 24"
-                                        >
-                                            <path
-                                                strokeLinecap="round"
-                                                strokeLinejoin="round"
-                                                strokeWidth={2}
-                                                d="M6 18L18 6M6 6l12 12"
-                                            />
-                                        </svg>
+                                        ✕
                                     </button>
                                 </div>
+                            </div>
 
-                                <div className="space-y-4">
+                            {/* Modal Body */}
+                            <div className="p-6 space-y-4">
+                                <div className="grid grid-cols-2 gap-4">
                                     <div>
-                                        <label className="text-sm text-karbos-lavender">Image</label>
-                                        <p className="text-karbos-light-blue font-mono">
-                                            {selectedJob.image}
-                                        </p>
+                                        <p className="text-xs text-gray-500">Docker Image</p>
+                                        <p className="text-sm text-white mt-1">{selectedJob.docker_image}</p>
                                     </div>
-
                                     <div>
-                                        <label className="text-sm text-karbos-lavender">Status</label>
-                                        <div className="mt-1">{getStatusBadge(selectedJob.status)}</div>
+                                        <p className="text-xs text-gray-500">Status</p>
+                                        <div className="mt-1">
+                                            <span className={`inline-flex items-center gap-1 px-2 py-1 rounded text-xs border ${getStatusColor(selectedJob.status)}`}>
+                                                {getStatusIcon(selectedJob.status)}
+                                                {selectedJob.status}
+                                            </span>
+                                        </div>
                                     </div>
-
-                                    {selectedJob.carbonImpact !== undefined && (
+                                    <div>
+                                        <p className="text-xs text-gray-500">User ID</p>
+                                        <p className="text-sm text-white mt-1">{selectedJob.user_id}</p>
+                                    </div>
+                                    <div>
+                                        <p className="text-xs text-gray-500">Region</p>
+                                        <p className="text-sm text-white mt-1">{selectedJob.region || 'N/A'}</p>
+                                    </div>
+                                    <div>
+                                        <p className="text-xs text-gray-500">Created</p>
+                                        <p className="text-sm text-white mt-1">{formatDate(selectedJob.created_at)}</p>
+                                    </div>
+                                    <div>
+                                        <p className="text-xs text-gray-500">Deadline</p>
+                                        <p className="text-sm text-white mt-1">{formatDate(selectedJob.deadline)}</p>
+                                    </div>
+                                    {selectedJob.started_at && (
                                         <div>
-                                            <label className="text-sm text-karbos-lavender">
-                                                Carbon Impact
-                                            </label>
-                                            <p className="text-green-400 font-semibold">
-                                                {selectedJob.carbonImpact}% reduction vs immediate execution
-                                            </p>
+                                            <p className="text-xs text-gray-500">Started</p>
+                                            <p className="text-sm text-white mt-1">{formatDate(selectedJob.started_at)}</p>
                                         </div>
                                     )}
-
-                                    <div>
-                                        <label className="text-sm text-karbos-lavender">Timeline</label>
-                                        <div className="mt-2 space-y-3">
-                                            <div className="flex items-start space-x-3">
-                                                <div className="w-2 h-2 rounded-full bg-blue-400 mt-1"></div>
-                                                <div>
-                                                    <p className="text-karbos-light-blue text-sm">
-                                                        Submitted
-                                                    </p>
-                                                    <p className="text-xs text-karbos-lavender">
-                                                        {new Date(selectedJob.submittedAt).toLocaleString()}
-                                                    </p>
-                                                </div>
-                                            </div>
-                                            {selectedJob.status === "DELAYED" &&
-                                                selectedJob.estimatedStart && (
-                                                    <div className="flex items-start space-x-3">
-                                                        <div className="w-2 h-2 rounded-full bg-yellow-400 mt-1"></div>
-                                                        <div>
-                                                            <p className="text-karbos-light-blue text-sm">
-                                                                Optimized Delay
-                                                            </p>
-                                                            <p className="text-xs text-karbos-lavender">
-                                                                Scheduled for{" "}
-                                                                {new Date(
-                                                                    selectedJob.estimatedStart,
-                                                                ).toLocaleString()}
-                                                            </p>
-                                                        </div>
-                                                    </div>
-                                                )}
-                                            {selectedJob.startTime && (
-                                                <div className="flex items-start space-x-3">
-                                                    <div className="w-2 h-2 rounded-full bg-green-400 mt-1"></div>
-                                                    <div>
-                                                        <p className="text-karbos-light-blue text-sm">
-                                                            Executed
-                                                        </p>
-                                                        <p className="text-xs text-karbos-lavender">
-                                                            {new Date(selectedJob.startTime).toLocaleString()}
-                                                        </p>
-                                                    </div>
-                                                </div>
-                                            )}
+                                    {selectedJob.completed_at && (
+                                        <div>
+                                            <p className="text-xs text-gray-500">Completed</p>
+                                            <p className="text-sm text-white mt-1">{formatDate(selectedJob.completed_at)}</p>
                                         </div>
-                                    </div>
-
-                                    <div>
-                                        <label className="text-sm text-karbos-lavender">
-                                            SLA Deadline
-                                        </label>
-                                        <p className="text-karbos-light-blue">
-                                            {new Date(selectedJob.slaDeadline).toLocaleString()}
-                                        </p>
-                                    </div>
-
-                                    <div>
-                                        <label className="text-sm text-karbos-lavender mb-2 block">
-                                            Logs
-                                        </label>
-                                        <div className="bg-black rounded-md p-4 font-mono text-sm text-green-400 max-h-64 overflow-y-auto">
-                                            <pre className="whitespace-pre-wrap">{selectedJob.logs}</pre>
-                                        </div>
-                                    </div>
+                                    )}
                                 </div>
+
+                                {/* Command */}
+                                {selectedJob.command && (
+                                    <div>
+                                        <p className="text-xs text-gray-500">Command</p>
+                                        <pre className="mt-1 p-3 bg-karbos-navy rounded text-xs text-gray-300 overflow-x-auto">
+                                            {selectedJob.command}
+                                        </pre>
+                                    </div>
+                                )}
+
+                                {/* Metadata */}
+                                {selectedJob.metadata && (
+                                    <div>
+                                        <p className="text-xs text-gray-500">Metadata</p>
+                                        <pre className="mt-1 p-3 bg-karbos-navy rounded text-xs text-gray-300 overflow-x-auto">
+                                            {JSON.stringify(JSON.parse(selectedJob.metadata), null, 2)}
+                                        </pre>
+                                    </div>
+                                )}
                             </div>
                         </motion.div>
-
-                        {/* Overlay */}
-                        <motion.div
-                            initial={{ opacity: 0 }}
-                            animate={{ opacity: 1 }}
-                            exit={{ opacity: 0 }}
-                            transition={{ duration: 0.2 }}
-                            className="fixed inset-0 bg-black bg-opacity-50 z-40"
-                            onClick={() => setSelectedJob(null)}
-                        />
-                    </>
+                    </motion.div>
                 )}
             </AnimatePresence>
         </motion.div>
