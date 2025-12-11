@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState } from "react";
+import React from "react";
 import { motion } from "framer-motion";
 
 interface NavigationProps {
@@ -9,7 +9,6 @@ interface NavigationProps {
 }
 
 const Navigation: React.FC<NavigationProps> = ({ activeTab, onTabChange }) => {
-  const [region, setRegion] = useState("us-east-1");
   const systemStatus = {
     scheduler: true,
     redis: true,
@@ -21,14 +20,6 @@ const Navigation: React.FC<NavigationProps> = ({ activeTab, onTabChange }) => {
     { id: "grid", label: "Grid Intelligence" },
     { id: "infrastructure", label: "Infrastructure" },
     { id: "playground", label: "Playground" },
-  ];
-
-  const regions = [
-    "us-east-1",
-    "us-west-2",
-    "eu-central-1",
-    "eu-west-1",
-    "ap-southeast-1",
   ];
 
   return (
@@ -75,18 +66,6 @@ const Navigation: React.FC<NavigationProps> = ({ activeTab, onTabChange }) => {
 
           {/* Region Selector & System Status */}
           <div className="flex items-center space-x-4">
-            <select
-              value={region}
-              onChange={(e) => setRegion(e.target.value)}
-              className="bg-karbos-indigo text-karbos-light-blue px-3 py-1 rounded-md text-sm border border-karbos-blue-purple focus:outline-none focus:ring-2 focus:ring-karbos-lavender"
-            >
-              {regions.map((r) => (
-                <option key={r} value={r}>
-                  {r}
-                </option>
-              ))}
-            </select>
-
             <div className="flex items-center space-x-2">
               <div className="flex items-center space-x-1">
                 <motion.div
