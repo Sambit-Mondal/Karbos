@@ -86,8 +86,12 @@ func (m *MetricsCollector) UpdateMetrics(ctx context.Context) error {
 	}
 
 	// Update jobs_running (active containers)
+	// Skip if worker pool not configured (e.g., API server)
 	if err := m.updateJobsRunning(); err != nil {
-		log.Printf("Warning: Failed to update jobs_running metric: %v", err)
+		// Only log if it's not a "worker pool not configured" error
+		if m.workerPool != nil {
+			log.Printf("Warning: Failed to update jobs_running metric: %v", err)
+		}
 	}
 
 	// Update co2_saved_total (cumulative savings)
@@ -140,35 +144,36 @@ func (m *MetricsCollector) updateCO2Saved(ctx context.Context) error {
 		return fmt.Errorf("database not configured")
 	}
 
-	// Query total CO2 saved from jobs table
-	// This assumes jobs table has a co2_saved_grams column
-	// If not, we'll calculate based on carbon_intensity and estimated_runtime
+	// Calculate CO2 savings based on execution logs
+	// Estimation: average power usage (50W) * duration * carbon intensity difference
+	// For now, we'll track completed jobs count as a proxy
+	// TODO: Implement actual CO2 calculation based on carbon intensity data
 	query := `
-		SELECT COALESCE(SUM(
-			CASE 
-				WHEN co2_saved_grams IS NOT NULL THEN co2_saved_grams
-				ELSE 0
-			END
-		), 0) as total_co2_saved
+		SELECT COUNT(*) as completed_jobs
 		FROM jobs
-		WHERE status = 'completed'
+		WHERE status = 'COMPLETED'
 	`
 
-	var totalCO2Saved float64
-	err := m.db.QueryRowContext(ctx, query).Scan(&totalCO2Saved)
+	var completedJobs int
+	err := m.db.QueryRowContext(ctx, query).Scan(&completedJobs)
 	if err != nil {
-		// If column doesn't exist, fall back to estimation
 		if err == sql.ErrNoRows {
-			totalCO2Saved = 0
+			completedJobs = 0
 		} else {
-			return fmt.Errorf("failed to query CO2 savings: %w", err)
+			return fmt.Errorf("failed to query completed jobs: %w", err)
 		}
 	}
 
-	// Set counter to absolute value
-	// Note: Prometheus counters can only increase, so we use a special pattern
-	// We'll track the last known value and only increment by the difference
-	m.co2SavedTotal.Add(totalCO2Saved)
+	// Estimate CO2 saved: assume each job saves ~100g CO2 on average
+	// This is a placeholder - actual calculation would need:
+	// - Job execution duration from execution_logs
+	// - Carbon intensity at scheduling time vs execution time
+	// - Estimated power consumption
+	estimatedCO2Saved := float64(completedJobs) * 100.0
+
+	// Note: This is cumulative, so we set it directly
+	// In a real implementation, we'd track incremental changes
+	m.co2SavedTotal.Add(estimatedCO2Saved)
 
 	return nil
 }
