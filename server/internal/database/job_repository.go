@@ -185,6 +185,55 @@ func (r *JobRepository) GetJobsByStatus(ctx context.Context, status models.JobSt
 	return jobs, nil
 }
 
+// GetAllJobs retrieves all jobs with optional limit
+func (r *JobRepository) GetAllJobs(ctx context.Context, limit int) ([]*models.Job, error) {
+	query := `
+		SELECT 
+			id, user_id, docker_image, command, status, scheduled_time,
+			created_at, started_at, completed_at, deadline, 
+			estimated_duration, region, metadata
+		FROM jobs
+		ORDER BY created_at DESC
+		LIMIT $1
+	`
+
+	rows, err := r.db.QueryContext(ctx, query, limit)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get all jobs: %w", err)
+	}
+	defer rows.Close()
+
+	var jobs []*models.Job
+	for rows.Next() {
+		job := &models.Job{}
+		err := rows.Scan(
+			&job.ID,
+			&job.UserID,
+			&job.DockerImage,
+			&job.Command,
+			&job.Status,
+			&job.ScheduledTime,
+			&job.CreatedAt,
+			&job.StartedAt,
+			&job.CompletedAt,
+			&job.Deadline,
+			&job.EstimatedDuration,
+			&job.Region,
+			&job.Metadata,
+		)
+		if err != nil {
+			return nil, fmt.Errorf("failed to scan job: %w", err)
+		}
+		jobs = append(jobs, job)
+	}
+
+	if err = rows.Err(); err != nil {
+		return nil, fmt.Errorf("error iterating jobs: %w", err)
+	}
+
+	return jobs, nil
+}
+
 // GetJobsByUserID retrieves jobs by user ID
 func (r *JobRepository) GetJobsByUserID(ctx context.Context, userID string, limit int) ([]*models.Job, error) {
 	query := `

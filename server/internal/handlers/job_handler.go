@@ -34,6 +34,9 @@ func NewJobHandler(jobRepo *database.JobRepository, queue *queue.RedisQueue, sch
 func (h *JobHandler) SubmitJob(c *fiber.Ctx) error {
 	var req models.SubmitJobRequest
 
+	// Check for dry-run mode
+	dryRun := c.Query("dry_run") == "true"
+
 	// Parse request body
 	if err := c.BodyParser(&req); err != nil {
 		log.Printf("Failed to parse request body: %v", err)
@@ -157,6 +160,23 @@ func (h *JobHandler) SubmitJob(c *fiber.Ctx) error {
 		Metadata:          "{}",
 	}
 
+	// If dry-run mode, return prediction without saving
+	if dryRun {
+		response := models.SubmitJobResponse{
+			JobID:             job.ID.String(),
+			Status:            models.JobStatusPending,
+			CreatedAt:         job.CreatedAt,
+			ScheduledTime:     scheduledTime.Format(time.RFC3339),
+			Immediate:         immediate,
+			ExpectedIntensity: expectedIntensity,
+			CarbonSavings:     carbonSavings,
+			Message:           "Dry run - job not created",
+		}
+
+		log.Printf("✓ Dry run completed: immediate=%v, savings=%.2f gCO2eq/kWh", immediate, carbonSavings)
+		return c.JSON(response)
+	}
+
 	// Save to database
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
@@ -257,6 +277,31 @@ func (h *JobHandler) GetJob(c *fiber.Ctx) error {
 	}
 
 	return c.JSON(job)
+}
+
+// GetAllJobs handles GET /api/jobs
+func (h *JobHandler) GetAllJobs(c *fiber.Ctx) error {
+	// Get limit from query params (default: 100)
+	limit := c.QueryInt("limit", 100)
+	if limit <= 0 || limit > 500 {
+		limit = 100
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	// Get all jobs
+	jobs, err := h.jobRepo.GetAllJobs(ctx, limit)
+	if err != nil {
+		log.Printf("Failed to get all jobs: %v", err)
+		return c.Status(fiber.StatusInternalServerError).JSON(models.ErrorResponse{
+			Error:   "database_error",
+			Message: "Failed to retrieve jobs",
+			Code:    fiber.StatusInternalServerError,
+		})
+	}
+
+	return c.JSON(jobs)
 }
 
 // GetUserJobs handles GET /api/users/:userId/jobs
