@@ -1,4 +1,5 @@
 <div align="center">
+    
 
 # ⚡ Karbos
 
@@ -13,6 +14,8 @@
 [![PRs Welcome](https://img.shields.io/badge/PRs-welcome-brightgreen.svg)](CONTRIBUTING.md)
 
 **Karbos is a carbon-aware workload orchestrator that reduces Scope 3 cloud emissions by time-shifting non-urgent compute tasks to greener energy windows.**
+
+![Karbos Logo](docs/screenshots/karbos.png)
 
 [Features](#-features) • [Quick Start](#-quick-start) • [Architecture](#-architecture) • [How It Works](#-how-it-works) • [Documentation](#-documentation)
 
