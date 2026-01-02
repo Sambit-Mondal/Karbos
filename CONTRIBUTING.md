@@ -128,7 +128,7 @@ Karbos/
 ## Getting Help
 
 - **LinkedIn**: [Connect with me!](https://linkedin.com/in/sambitm02)
-- **Email**: [Mail me!](sambitmondal2005@gmail.com)
+- **Email**: [Mail me!](mailto:sambitmondal2005@gmail.com)
 
 
 ## License
