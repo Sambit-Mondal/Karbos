@@ -1,7 +1,7 @@
 <div align="center">
     
 
-# ⚡ Karbos
+# Karbos
 
 ### Carbon-Aware Workload Orchestrator
 
