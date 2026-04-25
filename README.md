@@ -35,7 +35,7 @@ Karbos intelligently schedules non-urgent workloads to execute during low-carbon
 
 - **⚡ Carbon-Aware Scheduling** - Automatically time-shifts jobs to low-carbon windows
 - **📊 Real-Time Dashboard** - Monitor emissions savings, job queue, and infrastructure
-- **🌍 Grid Intelligence** - Integrates with ElectricityMaps/WattTime APIs for live carbon data
+- **🌍 Grid Intelligence** - Integrates with ElectricityMaps API for live carbon data
 - **⏰ SLA Compliance** - Guarantees deadline adherence while optimizing for carbon
 - **🔄 Smart Queue Management** - Dual-queue system (immediate + delayed execution)
 - **📈 Prometheus Metrics** - Export CO₂ savings, queue depth, and worker health
